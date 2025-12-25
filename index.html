@@ -1,13 +1,28 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>My First Web App</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Timer</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; padding: 16px; }
+    .time { font-size: 48px; font-weight: 700; margin: 16px 0; }
+    button { font-size: 16px; padding: 10px 14px; margin-right: 8px; }
+    .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  </style>
 </head>
 <body>
-  <h1>Hello GitHub Pages!</h1>
-  <p>It works 🎉</p>
-  <button onclick="sayHello()">Click me</button>
+  <h1>タイマー</h1>
+
+  <div class="time" id="time">60</div>
+
+  <div class="row">
+    <button id="startBtn">Start</button>
+    <button id="stopBtn">Stop</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+
+  <p id="status"></p>
 
   <script src="script.js"></script>
 </body>
