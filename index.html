@@ -12,11 +12,11 @@
       margin: 0 auto;
     }
     h1 { font-size: 20px; margin: 0 0 12px; }
+
     .bar {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 8px 12px;
-      align-items: center;
       margin-bottom: 12px;
     }
     .stat {
@@ -25,14 +25,13 @@
       border-radius: 10px;
       background: #fafafa;
       font-size: 14px;
-      line-height: 1.4;
     }
     .stat b { font-size: 18px; }
+
     .controls {
       display: flex;
       gap: 8px;
       margin: 12px 0 16px;
-      flex-wrap: wrap;
     }
     button.ctrl {
       padding: 10px 14px;
@@ -46,12 +45,12 @@
       display: grid;
       grid-template-columns: repeat(5, 1fr);
       gap: 8px;
+      min-height: 260px;
       user-select: none;
       -webkit-user-select: none;
     }
     .cell {
       aspect-ratio: 1 / 1;
-      width: 100%;
       border-radius: 12px;
       border: 1px solid #ddd;
       background: #fff;
@@ -68,181 +67,177 @@
       border-color: #ffb3b3;
       color: #7a0000;
     }
-    .cell:disabled {
-      opacity: 0.6;
-    }
+    .cell:disabled { opacity: 0.6; }
 
     .note {
-      color: #666;
       font-size: 12px;
+      color: #666;
       margin-top: 12px;
       line-height: 1.5;
     }
   </style>
 </head>
 <body>
-  <h1>1〜25 タップゲーム（ミスで−5秒）</h1>
 
-  <div class="bar">
-    <div class="stat">残り時間：<b id="time">60</b> 秒</div>
-    <div class="stat">次に押す数字：<b id="next">1</b></div>
-    <div class="stat">正解数：<b id="score">0</b> / 25</div>
-    <div class="stat">ミス：<b id="miss">0</b> 回</div>
-  </div>
+<h1>1〜25 タップゲーム</h1>
 
-  <div class="controls">
-    <button class="ctrl" id="startBtn">開始</button>
-    <button class="ctrl" id="resetBtn">リセット</button>
-  </div>
+<div class="bar">
+  <div class="stat">残り時間：<b id="time">60</b> 秒</div>
+  <div class="stat">次に押す数字：<b id="next">1</b></div>
+  <div class="stat">正解数：<b id="score">0</b> / 25</div>
+  <div class="stat">ミス：<b id="miss">0</b></div>
+  <div class="stat">ベスト：<b id="best">0</b></div>
+</div>
 
-  <div class="grid" id="grid" aria-label="number grid"></div>
+<div class="controls">
+  <button class="ctrl" id="startBtn">開始</button>
+  <button class="ctrl" id="resetBtn">リセット</button>
+</div>
 
-  <p class="note">
-    ルール：1→25の順にタップしてください。間違えたら残り時間が5秒減ります。
-  </p>
+<div class="grid" id="grid"></div>
 
-  <script>
-    // ===== 状態 =====
-    const GAME_SECONDS = 60;
-    const PENALTY_SECONDS = 5;
+<p class="note">
+  ルール：1 → 25 の順にタップ。<br>
+  間違えると <b>−5秒</b> & 振動します。
+</p>
 
-    let remaining = GAME_SECONDS;
-    let timerId = null;
-    let expected = 1;
-    let correctCount = 0;
-    let missCount = 0;
-    let isRunning = false;
+<script>
+  // ===== 設定 =====
+  const GAME_SECONDS = 60;
+  const PENALTY_SECONDS = 5;
+  const BEST_KEY = "best_correct_1to25";
 
-    // ===== DOM =====
-    const timeEl = document.getElementById("time");
-    const nextEl = document.getElementById("next");
-    const scoreEl = document.getElementById("score");
-    const missEl = document.getElementById("miss");
-    const gridEl = document.getElementById("grid");
-    const startBtn = document.getElementById("startBtn");
-    const resetBtn = document.getElementById("resetBtn");
+  // ===== 状態 =====
+  let remaining = GAME_SECONDS;
+  let expected = 1;
+  let correct = 0;
+  let miss = 0;
+  let timerId = null;
+  let running = false;
 
-    function renderStats() {
-      timeEl.textContent = String(remaining);
-      nextEl.textContent = String(expected);
-      scoreEl.textContent = String(correctCount);
-      missEl.textContent = String(missCount);
+  // ===== DOM =====
+  const timeEl = document.getElementById("time");
+  const nextEl = document.getElementById("next");
+  const scoreEl = document.getElementById("score");
+  const missEl = document.getElementById("miss");
+  const bestEl = document.getElementById("best");
+  const gridEl = document.getElementById("grid");
+  const startBtn = document.getElementById("startBtn");
+  const resetBtn = document.getElementById("resetBtn");
+
+  function render() {
+    timeEl.textContent = remaining;
+    nextEl.textContent = expected;
+    scoreEl.textContent = correct;
+    missEl.textContent = miss;
+  }
+
+  function getBest() {
+    return Number(localStorage.getItem(BEST_KEY)) || 0;
+  }
+
+  function setBest(v) {
+    localStorage.setItem(BEST_KEY, String(v));
+    bestEl.textContent = v;
+  }
+
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
     }
+    return arr;
+  }
 
-    // Fisher–Yates shuffle
-    function shuffle(arr) {
-      for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
-      }
-      return arr;
+  function buildGrid() {
+    gridEl.innerHTML = "";
+    const nums = shuffle([...Array(25)].map((_, i) => i + 1));
+
+    nums.forEach(n => {
+      const btn = document.createElement("button");
+      btn.className = "cell";
+      btn.textContent = n;
+      btn.dataset.num = n;
+
+      btn.addEventListener("click", () => {
+        if (!running) return;
+
+        if (n === expected) {
+          btn.classList.add("correct");
+          btn.disabled = true;
+          expected++;
+          correct++;
+          render();
+
+          if (correct === 25) finish("クリア");
+        } else {
+          miss++;
+          remaining = Math.max(0, remaining - PENALTY_SECONDS);
+          render();
+
+          // ★ ミス時の振動 ★
+          if (navigator.vibrate) navigator.vibrate(30);
+
+          btn.classList.add("wrong");
+          setTimeout(() => btn.classList.remove("wrong"), 180);
+
+          if (remaining === 0) finish("時間切れ");
+        }
+      });
+
+      gridEl.appendChild(btn);
+    });
+  }
+
+  function tick() {
+    remaining--;
+    if (remaining <= 0) {
+      remaining = 0;
+      render();
+      finish("時間切れ");
+    } else {
+      render();
     }
+  }
 
-    function buildGrid() {
-      gridEl.innerHTML = "";
+  function startGame() {
+    if (running) return;
+    buildGrid();
+    running = true;
+    startBtn.disabled = true;
+    timerId = setInterval(tick, 1000);
+  }
 
-      const numbers = shuffle(Array.from({ length: 25 }, (_, i) => i + 1));
-      for (const n of numbers) {
-        const btn = document.createElement("button");
-        btn.className = "cell";
-        btn.type = "button";
-        btn.textContent = String(n);
-        btn.dataset.num = String(n);
-        btn.disabled = false;
+  function finish(msg) {
+    clearInterval(timerId);
+    timerId = null;
+    running = false;
+    startBtn.disabled = false;
 
-        btn.addEventListener("click", (event) => {
-          if (!isRunning) return;
+    if (correct > getBest()) setBest(correct);
 
-          const num = Number(event.currentTarget.dataset.num);
+    alert(msg + "：正解 " + correct + " / 25");
+  }
 
-          if (num === expected) {
-            event.currentTarget.classList.remove("wrong");
-            event.currentTarget.classList.add("correct");
-            event.currentTarget.disabled = true;
+  function resetGame() {
+    clearInterval(timerId);
+    timerId = null;
+    remaining = GAME_SECONDS;
+    expected = 1;
+    correct = 0;
+    miss = 0;
+    running = false;
+    startBtn.disabled = false;
+    gridEl.innerHTML = "";
+    render();
+    bestEl.textContent = getBest();
+  }
 
-            expected += 1;
-            correctCount += 1;
-            renderStats();
+  startBtn.addEventListener("click", startGame);
+  resetBtn.addEventListener("click", resetGame);
 
-            if (correctCount === 25) {
-              endGame("クリア");
-            }
-          } else {
-            missCount += 1;
-            remaining = Math.max(0, remaining - PENALTY_SECONDS);
-            renderStats();
+  resetGame();
+</script>
 
-            // 一瞬だけ赤くする（視認用）
-            const el = event.currentTarget;
-            el.classList.add("wrong");
-            setTimeout(() => el.classList.remove("wrong"), 200);
-
-            if (remaining === 0) {
-              endGame("時間切れ");
-            }
-          }
-        });
-
-        gridEl.appendChild(btn);
-      }
-    }
-
-    function tick() {
-      remaining -= 1;
-      if (remaining <= 0) {
-        remaining = 0;
-        renderStats();
-        endGame("時間切れ");
-        return;
-      }
-      renderStats();
-    }
-
-    function startGame() {
-      if (isRunning) return;
-
-      // 初回開始時に盤面が無い場合に備えて生成
-      if (gridEl.children.length === 0) buildGrid();
-
-      isRunning = true;
-      startBtn.disabled = true;
-      timerId = setInterval(tick, 1000);
-    }
-
-    function endGame(reason) {
-      if (timerId !== null) {
-        clearInterval(timerId);
-        timerId = null;
-      }
-      isRunning = false;
-      startBtn.disabled = false;
-
-      // ここは「確定仕様」ではないので、表示だけ最小限に留めます
-      alert(reason + "：正解数 " + correctCount + "/25、ミス " + missCount + "回");
-    }
-
-    function resetGame() {
-      if (timerId !== null) {
-        clearInterval(timerId);
-        timerId = null;
-      }
-      remaining = GAME_SECONDS;
-      expected = 1;
-      correctCount = 0;
-      missCount = 0;
-      isRunning = false;
-      startBtn.disabled = false;
-
-      buildGrid();
-      renderStats();
-    }
-
-    // controls
-    startBtn.addEventListener("click", startGame);
-    resetBtn.addEventListener("click", resetGame);
-
-    // init
-    resetGame();
-  </script>
 </body>
 </html>
