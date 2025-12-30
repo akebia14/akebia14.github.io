@@ -17,3 +17,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .tiles img { width: 44px; height: 60px; object-fit: contain; background:#08101b; border:1px solid #1d2a3c; border-radius: 8px; }
 .hint { margin-top: 8px; font-size: 12px; opacity: .8; }
 .log { margin:0; white-space: pre-wrap; background:#08101b; border:1px solid #1d2a3c; border-radius: 10px; padding: 10px; font-size: 12px; line-height: 1.5; }
+.handRow { display:flex; gap: 10px; align-items:flex-start; }
+.drawnCol { display:flex; flex-direction:column; gap: 6px; min-width: 56px; }
+.drawnLabel { font-size: 12px; opacity: .85; font-weight: 700; }
+.tiles.drawn img { outline: 2px solid #2f81f7; } /* 視認性用（不要なら削除可） */
+
