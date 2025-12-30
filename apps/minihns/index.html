@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Mini Idle Hack&Slash (Phase 1)</title>
+  <title>Mini Idle Hack&Slash (Phase 2)</title>
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 16px; line-height: 1.5; }
     button { padding: 10px 12px; margin: 4px 6px 4px 0; }
@@ -13,7 +13,7 @@
   </style>
 </head>
 <body>
-  <h1>Mini Idle Hack&Slash（Phase 1）</h1>
+  <h1>Mini Idle Hack&Slash（Phase 2）</h1>
 
   <div class="row">
     <button id="btnStart">周回開始</button>
@@ -30,6 +30,12 @@
   </div>
 
   <div class="box">
+    <div><strong>強化</strong></div>
+    <div>DPS Lv: <span id="dpsLevel" class="mono">-</span></div>
+    <button id="btnUpgradeDps">DPS強化 (<span id="dpsCost" class="mono">-</span> G)</button>
+  </div>
+
+  <div class="box">
     <div>ログ</div>
     <pre id="log" class="mono" style="white-space:pre-wrap; margin:0;"></pre>
   </div>
@@ -39,14 +45,21 @@
   'use strict';
 
   /*********************
-   * 定数（Phase 1）
+   * 定数
    *********************/
-  const SAVE_KEY = 'mini_hns_phase1_v1';
-  const TICK_MS = 100; // 100ms刻みで進行
+  const SAVE_KEY = 'mini_hns_phase2_v1';
+  const TICK_MS = 100;
+
   const BASE_DPS = 5;
+  const DPS_PER_LEVEL = 2;
+
   const BASE_ENEMY_HP = 50;
-  const ENEMY_HP_GROWTH_PER_RUN = 10; // 周回ごとにHP増（Phase 1のインフレの種）
+  const ENEMY_HP_GROWTH_PER_RUN = 10;
+
   const GOLD_REWARD_BASE = 10;
+
+  const DPS_UPGRADE_BASE_COST = 20;
+  const DPS_UPGRADE_COST_RATE = 1.5;
 
   /*********************
    * 状態
@@ -54,6 +67,7 @@
   let state = {
     gold: 0,
     runs: 0,
+    dpsLevel: 0,
     dps: BASE_DPS,
     enemyHpMax: BASE_ENEMY_HP,
     enemyHp: BASE_ENEMY_HP,
@@ -74,14 +88,27 @@
   const elGold = $('gold');
   const elRuns = $('runs');
   const elLog = $('log');
+  const elDpsLevel = $('dpsLevel');
+  const elDpsCost = $('dpsCost');
 
   const btnStart = $('btnStart');
   const btnStop = $('btnStop');
   const btnReset = $('btnReset');
+  const btnUpgradeDps = $('btnUpgradeDps');
 
   /*********************
-   * ログ
+   * ユーティリティ
    *********************/
+  function calcDps() {
+    return BASE_DPS + state.dpsLevel * DPS_PER_LEVEL;
+  }
+
+  function calcDpsUpgradeCost() {
+    return Math.floor(
+      DPS_UPGRADE_BASE_COST * Math.pow(DPS_UPGRADE_COST_RATE, state.dpsLevel)
+    );
+  }
+
   function log(line) {
     const ts = new Date().toLocaleString();
     elLog.textContent = `[${ts}] ${line}\n` + elLog.textContent;
@@ -99,15 +126,10 @@
     if (!raw) return false;
     try {
       const parsed = JSON.parse(raw);
-      // 期待フィールドだけを反映（壊れたデータを防ぐ）
-      state.gold = Number(parsed.gold) || 0;
-      state.runs = Number(parsed.runs) || 0;
-      state.dps = Number(parsed.dps) || BASE_DPS;
-      state.enemyHpMax = Number(parsed.enemyHpMax) || BASE_ENEMY_HP;
-      state.enemyHp = Number(parsed.enemyHp) || state.enemyHpMax;
-      state.inRun = Boolean(parsed.inRun);
+      state = { ...state, ...parsed };
+      state.dps = calcDps();
       return true;
-    } catch (e) {
+    } catch {
       return false;
     }
   }
@@ -118,6 +140,7 @@
     state = {
       gold: 0,
       runs: 0,
+      dpsLevel: 0,
       dps: BASE_DPS,
       enemyHpMax: BASE_ENEMY_HP,
       enemyHp: BASE_ENEMY_HP,
@@ -131,8 +154,7 @@
    * ゲーム進行
    *********************/
   function prepareNextEnemy() {
-    // 周回数に応じて敵HPを増やす（Phase 1の単純インフレ）
-    state.enemyHpMax = BASE_ENEMY_HP + (state.runs * ENEMY_HP_GROWTH_PER_RUN);
+    state.enemyHpMax = BASE_ENEMY_HP + state.runs * ENEMY_HP_GROWTH_PER_RUN;
     state.enemyHp = state.enemyHpMax;
   }
 
@@ -140,42 +162,49 @@
     if (state.inRun) return;
     state.inRun = true;
     prepareNextEnemy();
-    render();
     log(`周回開始：敵HP=${state.enemyHpMax}, DPS=${state.dps}`);
-
-    // 既存タイマーがあれば停止してから開始
-    if (timerId) clearInterval(timerId);
+    timerId && clearInterval(timerId);
     timerId = setInterval(tick, TICK_MS);
+    render();
   }
 
   function stopRun() {
     state.inRun = false;
-    if (timerId) {
-      clearInterval(timerId);
-      timerId = null;
-    }
+    timerId && clearInterval(timerId);
+    timerId = null;
     render();
   }
 
   function tick() {
     if (!state.inRun) return;
 
-    // 100msで進むダメージ量 = DPS * (tick秒)
     const damage = state.dps * (TICK_MS / 1000);
     state.enemyHp = Math.max(0, state.enemyHp - damage);
 
     if (state.enemyHp <= 0) {
-      // 撃破
       state.runs += 1;
-      const reward = GOLD_REWARD_BASE; // Phase 1では固定報酬
-      state.gold += reward;
-      log(`撃破！ +${reward}G（累計G=${state.gold} / 周回=${state.runs}）`);
-
-      // 次の敵へ（自動周回）
+      state.gold += GOLD_REWARD_BASE;
+      log(`撃破！ +${GOLD_REWARD_BASE}G`);
       prepareNextEnemy();
-      log(`次の敵：HP=${state.enemyHpMax}`);
     }
 
+    save();
+    render();
+  }
+
+  /*********************
+   * 強化
+   *********************/
+  function upgradeDps() {
+    const cost = calcDpsUpgradeCost();
+    if (state.gold < cost) {
+      log('Goldが足りません。');
+      return;
+    }
+    state.gold -= cost;
+    state.dpsLevel += 1;
+    state.dps = calcDps();
+    log(`DPS強化！ Lv${state.dpsLevel}（DPS=${state.dps}）`);
     save();
     render();
   }
@@ -185,19 +214,22 @@
    *********************/
   function render() {
     elStatus.textContent = state.inRun ? 'RUNNING' : 'IDLE';
-    elEnemyHp.textContent = Math.ceil(state.enemyHp).toString();
-    elEnemyHpMax.textContent = Math.ceil(state.enemyHpMax).toString();
-    elDps.textContent = state.dps.toString();
-    elGold.textContent = state.gold.toString();
-    elRuns.textContent = state.runs.toString();
+    elEnemyHp.textContent = Math.ceil(state.enemyHp);
+    elEnemyHpMax.textContent = state.enemyHpMax;
+    elDps.textContent = state.dps;
+    elGold.textContent = state.gold;
+    elRuns.textContent = state.runs;
+    elDpsLevel.textContent = state.dpsLevel;
+    elDpsCost.textContent = calcDpsUpgradeCost();
   }
 
   /*********************
    * イベント
    *********************/
-  btnStart.addEventListener('click', () => startRun());
-  btnStop.addEventListener('click', () => { log('停止しました。'); stopRun(); save(); });
-  btnReset.addEventListener('click', () => resetAll());
+  btnStart.onclick = startRun;
+  btnStop.onclick = () => { log('停止しました。'); stopRun(); save(); };
+  btnReset.onclick = resetAll;
+  btnUpgradeDps.onclick = upgradeDps;
 
   /*********************
    * 初期化
@@ -205,12 +237,6 @@
   const loaded = load();
   render();
   log(loaded ? 'セーブデータをロードしました。' : '新規開始です。');
-
-  // ロード時にinRun=trueだった場合でも、勝手に再開はしない（操作を単純化）
-  // 必要ならPhase 2以降で「自動再開」を入れます。
-  state.inRun = false;
-  save();
-  render();
 })();
 </script>
 </body>
