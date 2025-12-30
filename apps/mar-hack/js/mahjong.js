@@ -234,18 +234,23 @@
   };
 
   const isSanshokuDoujun = (decomp) => {
-    // 同一数字の順子が3色
-    const seqs = decomp.melds.filter(m => m.type === "seq").map(m => m.tiles);
+    // 三色同順：同一数字の順子（n,n+1,n+2）が m/p/s の3色で揃う
+    // 例：123m + 123p + 123s
+    const seqStarts = new Set(
+      decomp.melds
+        .filter(m => m.type === "seq")
+        .map(m => m.tiles[0]) // "1m" など（順子の先頭牌）
+    );
+  
     for (let n = 1; n <= 7; n++) {
-      const need = new Set([`m${n}`, `p${n}`, `s${n}`]);
-      for (const s of ["m","p","s"]) {
-        const has = seqs.some(t => t[0] === `${n}${s}` && t[1] === `${n+1}${s}` && t[2] === `${n+2}${s}`);
-        if (!has) need.delete(`${s}${n}`);
-      }
-      if (need.size === 0) return true;
+      const okM = seqStarts.has(`${n}m`);
+      const okP = seqStarts.has(`${n}p`);
+      const okS = seqStarts.has(`${n}s`);
+      if (okM && okP && okS) return true;
     }
     return false;
   };
+
 
   const isSanshokuDoukou = (decomp) => {
     // 同一数字の刻子/槓子が3色 :contentReference[oaicite:19]{index=19}
