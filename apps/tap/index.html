@@ -472,6 +472,7 @@
     function onStageClear() {
       // クリア済み数を加算
       stageCleared += 1;
+      remaining = GAME_SECONDS; // ← 60秒にリセット
 
       // ステージクリアボーナス：Stage数×100（クリアしたステージ番号）
       points += stageNo * 100;
