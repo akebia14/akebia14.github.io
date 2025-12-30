@@ -106,7 +106,7 @@
 
   <p class="note">
     ルール：1→25を順にタップ。ミスで <b>−5秒</b>。<br>
-    コンボ猶予：通常 <b>1.0秒</b> / コンボ3以上 <b>1.5秒</b> / コンボ5以上 <b>1.0秒</b>。<br>
+    コンボ猶予：通常 <b>2.0秒</b> / コンボ3以上 <b>1.5秒</b> / コンボ5以上 <b>1.0秒</b>。<br>
     クリア時：<b>合算スコア = ポイント + 残り秒</b>（残り秒をそのまま加算）。ベストは合算スコアを保存。
   </p>
 
@@ -147,7 +147,7 @@
     function comboWindowMsByCombo(comboCount) {
       if (comboCount >= 5) return 1000;
       if (comboCount >= 3) return 1500;
-      return 2000;
+      return 1000;
     }
 
     // ベストは「合算スコア（クリア時 points + remaining）」で保存
