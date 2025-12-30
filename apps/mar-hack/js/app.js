@@ -6,7 +6,7 @@
  */
 
 (() => {
-  const GAME_MAX_DRAWS = 20;
+  const GAME_MAX_DRAWS = 50;
   const AUTO_DRAW_DELAY_MS = 200;
 
   const $ = (id) => document.getElementById(id);
