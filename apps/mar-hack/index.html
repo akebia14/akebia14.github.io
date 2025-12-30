@@ -1,1 +1,65 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mah Hack（ソロ麻雀MVP）</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="bar">
+    <div class="title">Mah Hack（ソロ麻雀MVP）</div>
+    <div class="meta">
+      <span id="drawCount">ツモ 0 / 20</span>
+      <span id="wallCount">山 0</span>
+    </div>
+  </header>
 
+  <main class="wrap">
+    <section class="panel">
+      <div class="row">
+        <button id="btnNew">新規開始</button>
+        <button id="btnDraw" disabled>ツモ</button>
+        <button id="btnWin" disabled>上がる（ツモ）</button>
+      </div>
+
+      <div class="row small">
+        <label class="chk">
+          <input type="checkbox" id="optMangan30fu4han" checked />
+          30符4翻を満貫扱い（仕様）
+        </label>
+      </div>
+
+      <div class="row">
+        <div class="box">
+          <div class="boxTitle">ドラ表示牌</div>
+          <div id="doraIndicator" class="tiles"></div>
+        </div>
+        <div class="box">
+          <div class="boxTitle">ドラ</div>
+          <div id="doraTile" class="tiles"></div>
+        </div>
+      </div>
+
+      <div class="box">
+        <div class="boxTitle">手牌（クリックで捨て牌）</div>
+        <div id="hand" class="tiles hand"></div>
+        <div class="hint">※ ツモ後に1枚捨てて進行します（鳴き/カンなし）</div>
+      </div>
+
+      <div class="box">
+        <div class="boxTitle">捨て牌</div>
+        <div id="discards" class="tiles discards"></div>
+      </div>
+
+      <div class="box">
+        <div class="boxTitle">ログ</div>
+        <pre id="log" class="log"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="./js/mahjong.js"></script>
+  <script src="./js/app.js"></script>
+</body>
+</html>
