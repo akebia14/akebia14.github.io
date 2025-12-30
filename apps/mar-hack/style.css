@@ -17,8 +17,29 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .tiles img { width: 44px; height: 60px; object-fit: contain; background:#08101b; border:1px solid #1d2a3c; border-radius: 8px; }
 .hint { margin-top: 8px; font-size: 12px; opacity: .8; }
 .log { margin:0; white-space: pre-wrap; background:#08101b; border:1px solid #1d2a3c; border-radius: 10px; padding: 10px; font-size: 12px; line-height: 1.5; }
-.handRow { display:flex; gap: 10px; align-items:flex-start; }
-.drawnCol { display:flex; flex-direction:column; gap: 6px; min-width: 56px; }
-.drawnLabel { font-size: 12px; opacity: .85; font-weight: 700; }
-.tiles.drawn img { outline: 2px solid #2f81f7; } /* 視認性用（不要なら削除可） */
+/* 手牌 + ツモ枠を同じ高さで揃える */
+.handRow {
+  display: flex;
+  align-items: center;   /* ← これで縦ズレを消す */
+  gap: 16px;             /* ← 全体の間隔を少し広げる（右にずれる） */
+}
+/* ツモ枠をさらに右へ寄せたい場合 */
+.drawnCol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 72px;       /* ← 右側カラムを広めに確保（右にズレた見た目になる） */
+  margin-left: 6px;      /* ← 追加で右へ */
+}
+/* ラベル */
+.drawnLabel {
+  font-size: 12px;
+  opacity: .85;
+  font-weight: 700;
+}
+/* ツモ牌の見た目（任意） */
+.tiles.drawn img {
+  outline: 2px solid #2f81f7;
+}
 
