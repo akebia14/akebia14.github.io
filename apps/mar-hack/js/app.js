@@ -207,6 +207,10 @@
 
       seatWind: "東",
       roundWind: "東",
+
+      ippatsuEligible: false,        // リーチ成立後、次のツモで一発判定可能
+      ippatsuOnThisDraw: false,      // 直近のツモが“一発対象ツモ”か
+
     };
 
     log("新規開始：配牌13枚（親/場風=東 固定）");
@@ -229,6 +233,7 @@
     state.draws += 1;
     state.lastDraw = t;
     state.lastWinFrom = "live";
+    state.ippatsuOnThisDraw = !!state.ippatsuEligible;
 
     log(`ツモ(${state.draws}): ${t}`);
 
@@ -245,6 +250,13 @@
 
     log(`捨て: ${discardedTile}`);
     render();
+
+    // 一発はリーチ成立後の“次の1ツモ”限定。和了しなければ捨て牌後に消滅。
+    if (state.ippatsuOnThisDraw) {
+      state.ippatsuEligible = false;
+      state.ippatsuOnThisDraw = false;
+    }
+
 
     // 20回目を捨て終わった時点で未和了なら流局
     if (state.draws >= GAME_MAX_DRAWS) {
@@ -272,6 +284,7 @@
         state.doubleRiichi = false;
       } else {
         log(`リーチ成立：待ち=${waits.join(" ")}`);
+        state.ippatsuEligible = true;  // リーチ成立→次のツモが一発対象
       }
       state.riichiTurnLocked = false;
     }
@@ -305,7 +318,7 @@
     if (!canRiichiNow()) return;
 
     // 第一巡（最初の捨て牌前）のリーチをダブルリーチ扱い 
-    const beforeFirstDiscard = state.discards.length === 0;
+    const beforeFirstDiscard = (state.draws === 1 && state.discards.length === 0);
     state.riichi = true;
     state.doubleRiichi = beforeFirstDiscard;
     state.riichiTurnLocked = true;
@@ -317,6 +330,11 @@
   function ankan() {
     if (!state || state.isEnded) return;
     if (!state.drawn) return;
+
+    // 一発は副露/カンで中断されるため、リーチ後のカンで一発権利を消す
+    state.ippatsuEligible = false;
+    state.ippatsuOnThisDraw = false;
+
 
     const tiles14 = [...state.hand, state.drawn];
     const c = MahHack.countTiles(tiles14);
@@ -390,6 +408,7 @@
       riichi: state.riichi && !state.doubleRiichi,
       doubleRiichi: state.doubleRiichi,
       haitei,
+      ippatsu: state.ippatsuOnThisDraw === true,
       houtei: false,   // ソロ仕様では発生しない 
       rinshan,
       chankan: false,  // ソロ仕様では発生しない 
