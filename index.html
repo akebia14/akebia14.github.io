@@ -13,8 +13,9 @@
     .stat { padding: 10px 12px; border: 1px solid #ddd; border-radius: 10px; background: #fafafa; font-size: 14px; }
     .stat b { font-size: 18px; }
 
-    .controls { display: flex; gap: 8px; margin: 12px 0 16px; }
+    .controls { display: flex; gap: 8px; margin: 12px 0 16px; flex-wrap: wrap; }
     button.ctrl { padding: 10px 14px; font-size: 16px; border-radius: 10px; border: 1px solid #ddd; background: #fff; }
+    button.ctrl:disabled { opacity: 0.6; }
 
     .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; min-height: 260px; user-select: none; -webkit-user-select: none; }
     .cell { aspect-ratio: 1 / 1; border-radius: 12px; border: 1px solid #ddd; background: #fff; font-size: 18px; font-weight: 700; }
@@ -27,11 +28,58 @@
 
     .note { font-size: 12px; color: #666; margin-top: 12px; line-height: 1.6; }
     .note b { color:#333; }
+
+    /* ===== Modal ===== */
+    .modalOverlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 9999;
+    }
+    .modal {
+      width: min(520px, 100%);
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid #eee;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      padding: 14px;
+    }
+    .modal h2 { font-size: 18px; margin: 0 0 10px; }
+    .modal .summary {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 12px;
+      margin-bottom: 12px;
+    }
+    .modal .box {
+      border: 1px solid #eee;
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: #fafafa;
+      font-size: 14px;
+    }
+    .modal .box b { font-size: 18px; }
+    .modal .actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .modal button {
+      padding: 10px 14px;
+      font-size: 14px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      background: #fff;
+    }
   </style>
 </head>
 <body>
   <h1>1〜25 タップゲーム（コンボ・合算スコア）</h1>
-  <div class="ver">v20251230-combo-score-1</div>
+  <div class="ver">v20251230-combo-window-1</div>
 
   <div class="bar">
     <div class="stat">残り時間：<b id="time">60</b> 秒</div>
@@ -44,7 +92,7 @@
     <div class="stat">ベスト（合算）：<b id="best">—</b></div>
 
     <div class="stat" style="grid-column: 1 / -1;">
-      コンボ猶予（2秒）
+      コンボ猶予：<b id="comboWindowLabel">1.0</b> 秒
       <div class="gaugeWrap"><div id="comboGauge" class="gaugeBar"></div></div>
     </div>
   </div>
@@ -57,32 +105,68 @@
   <div class="grid" id="grid" aria-label="number grid"></div>
 
   <p class="note">
-    ルール：1→25を順にタップ。<b>ミスで −5秒</b> & <b>ポイント −1</b>。<br>
-    コンボ：前回の正解から<b>2秒以内</b>に次の正解で成立。<br>
-    クリア時スコア：<b>（ポイント）＋（残り秒）</b>。ベストは合算スコアを保存します。
+    ルール：1→25を順にタップ。ミスで <b>−5秒</b>。<br>
+    コンボ猶予：通常 <b>1.0秒</b> / コンボ3以上 <b>1.5秒</b> / コンボ5以上 <b>1.0秒</b>。<br>
+    クリア時：<b>合算スコア = ポイント + 残り秒</b>（残り秒をそのまま加算）。ベストは合算スコアを保存。
   </p>
+
+  <!-- ===== Modal ===== -->
+  <div class="modalOverlay" id="modalOverlay" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal">
+      <h2 id="modalTitle">結果</h2>
+      <div class="summary">
+        <div class="box">合算スコア：<b id="modalTotal">0</b></div>
+        <div class="box">ベスト：<b id="modalBest">—</b></div>
+        <div class="box">ポイント：<b id="modalPoints">0</b></div>
+        <div class="box">残り秒：<b id="modalRemain">0</b></div>
+        <div class="box">ミス：<b id="modalMiss">0</b></div>
+        <div class="box">状態：<b id="modalState">—</b></div>
+      </div>
+      <div class="actions">
+        <button id="modalRetryBtn">もう一回</button>
+        <button id="modalCloseBtn">閉じる</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     // ===== 仕様 =====
     const GAME_SECONDS = 60;
-    const PENALTY_SECONDS = 5;
+    const TIME_PENALTY_SECONDS = 5;
 
-    const COMBO_WINDOW_MS = 2000;
+    // コンボ加点（コンボ回数に応じて）
+    // combo 1-2: +1, combo 3-4: +2, combo 5+: +5
+    function comboBonus(comboCount) {
+      if (comboCount >= 5) return 5;
+      if (comboCount >= 3) return 2;
+      return 1;
+    }
 
-    // ベストは「合算スコア（ポイント+残り秒）」で保存
-    const BEST_KEY = "best_total_score_points_plus_remaining";
+    // コンボ猶予（ms）
+    // 通常: 1.0s, combo>=3: 1.5s, combo>=5: 1.0s
+    function comboWindowMsByCombo(comboCount) {
+      if (comboCount >= 5) return 1000;
+      if (comboCount >= 3) return 1500;
+      return 1000;
+    }
+
+    // ベストは「合算スコア（クリア時 points + remaining）」で保存
+    const BEST_KEY = "best_total_score_points_plus_remaining_v2";
 
     // ===== 状態 =====
+    // phase: "idle" | "running" | "ended"
+    let phase = "idle";
+
     let remaining = GAME_SECONDS;
     let expected = 1;
     let miss = 0;
 
-    let points = 0;          // コンボ加点・ミス減点・（クリア時）残り秒加点
-    let combo = 0;           // 高速遷移コンボ回数（2回目の正解で1になる）
-    let lastCorrectAt = null;
+    let points = 0;
+    let combo = 0;               // 高速遷移コンボ回数（2回目の正解で1になる）
+    let lastCorrectAt = null;    // performance.now()
+    let activeComboWindowMs = 1000;
 
     let timerId = null;
-    let running = false;
 
     let gaugeRafId = null;
 
@@ -94,10 +178,23 @@
     const comboEl = document.getElementById("combo");
     const bestEl = document.getElementById("best");
     const comboGaugeEl = document.getElementById("comboGauge");
+    const comboWindowLabelEl = document.getElementById("comboWindowLabel");
 
     const gridEl = document.getElementById("grid");
     const startBtn = document.getElementById("startBtn");
     const resetBtn = document.getElementById("resetBtn");
+
+    // Modal
+    const modalOverlay = document.getElementById("modalOverlay");
+    const modalTitle = document.getElementById("modalTitle");
+    const modalTotal = document.getElementById("modalTotal");
+    const modalBest = document.getElementById("modalBest");
+    const modalPoints = document.getElementById("modalPoints");
+    const modalRemain = document.getElementById("modalRemain");
+    const modalMiss = document.getElementById("modalMiss");
+    const modalState = document.getElementById("modalState");
+    const modalRetryBtn = document.getElementById("modalRetryBtn");
+    const modalCloseBtn = document.getElementById("modalCloseBtn");
 
     function render() {
       timeEl.textContent = String(remaining);
@@ -105,6 +202,8 @@
       missEl.textContent = String(miss);
       pointsEl.textContent = String(points);
       comboEl.textContent = String(combo);
+
+      comboWindowLabelEl.textContent = (activeComboWindowMs / 1000).toFixed(1);
     }
 
     function getBest() {
@@ -117,7 +216,7 @@
       bestEl.textContent = String(v);
     }
 
-    // ===== シャッフル =====
+    // ===== ユーティリティ =====
     function shuffle(arr) {
       for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -141,19 +240,22 @@
       if (gaugeRafId !== null) return;
 
       const loop = () => {
-        if (!running || lastCorrectAt === null) {
+        if (phase !== "running" || lastCorrectAt === null) {
           stopComboGauge();
           return;
         }
 
         const now = performance.now();
-        const remainMs = Math.max(0, COMBO_WINDOW_MS - (now - lastCorrectAt));
-        const pct = (remainMs / COMBO_WINDOW_MS) * 100;
+        const remainMs = Math.max(0, activeComboWindowMs - (now - lastCorrectAt));
+        const pct = (remainMs / activeComboWindowMs) * 100;
 
         comboGaugeEl.style.width = pct.toFixed(2) + "%";
 
         if (remainMs === 0) {
+          // 猶予切れ → コンボ終了（次の正解から新規チェーン）
           combo = 0;
+          lastCorrectAt = null;
+          activeComboWindowMs = comboWindowMsByCombo(combo);
           render();
           stopComboGauge();
           return;
@@ -168,7 +270,6 @@
     // ===== 盤面生成 =====
     function buildGrid() {
       clearGrid();
-
       const nums = shuffle(Array.from({ length: 25 }, (_, i) => i + 1));
 
       for (const n of nums) {
@@ -178,65 +279,63 @@
         btn.textContent = String(n);
 
         btn.addEventListener("click", () => {
-          if (!running) return;
+          if (phase !== "running") return;
 
           if (n === expected) {
             // 正解
             btn.classList.add("correct");
             btn.disabled = true;
 
-            // コンボ判定（「前回正解→今回正解」間が2秒以内）
             const now = performance.now();
 
             if (lastCorrectAt !== null) {
               const delta = now - lastCorrectAt;
 
-              if (delta <= COMBO_WINDOW_MS) {
+              if (delta <= activeComboWindowMs) {
                 combo += 1;
-
-                // コンボ加点
-                if (combo >= 5) points += 5;
-                else if (combo >= 3) points += 2;
-                else points += 1;
-
+                points += comboBonus(combo);
               } else {
-                combo = 0; // 2秒超えで途切れ
+                combo = 0;
               }
             } else {
-              combo = 0; // 1回目の正解は起点
+              combo = 0;
             }
 
             lastCorrectAt = now;
+            activeComboWindowMs = comboWindowMsByCombo(combo);
+            render();
             startComboGauge();
 
             expected += 1;
-            render();
 
-            if (expected === 26) finish(); // 25まで到達
+            if (expected === 26) {
+              finish("clear");
+              return;
+            }
+
+            render();
           } else {
             // ミス
             miss += 1;
+            remaining = Math.max(0, remaining - TIME_PENALTY_SECONDS);
 
-            // 時間ペナルティ
-            remaining = Math.max(0, remaining - PENALTY_SECONDS);
-
-            // ポイント減点（あなたの仕様どおり）
-            points -= 1;
-
-            // コンボは途切れる
+            // コンボ途切れ
             combo = 0;
             lastCorrectAt = null;
+            activeComboWindowMs = comboWindowMsByCombo(combo);
             stopComboGauge();
 
             render();
 
-            // 振動（動作は端末/ブラウザ仕様に依存）
+            // 振動（端末/ブラウザ仕様に依存）
             if (navigator.vibrate) navigator.vibrate(30);
 
             btn.classList.add("wrong");
             setTimeout(() => btn.classList.remove("wrong"), 180);
 
-            if (remaining === 0) gameOver();
+            if (remaining === 0) {
+              finish("timeout");
+            }
           }
         });
 
@@ -250,68 +349,46 @@
       if (remaining <= 0) {
         remaining = 0;
         render();
-        gameOver();
+        finish("timeout");
         return;
       }
-      render();
-    }
-
-    function startGame() {
-      if (running) return;
-
-      // 開始時に盤面生成
-      buildGrid();
-
-      running = true;
-      startBtn.disabled = true;
-
-      // 初回開始時はコンボ起点なし
-      combo = 0;
-      lastCorrectAt = null;
-      stopComboGauge();
-
-      timerId = setInterval(tick, 1000);
       render();
     }
 
     function stopTimer() {
       if (timerId !== null) clearInterval(timerId);
       timerId = null;
-      running = false;
-      startBtn.disabled = false;
     }
 
-    function finish() {
-      // クリア時：残り秒をそのままポイントに加算（あなたの仕様）
-      points += remaining;
+    // ===== Modal =====
+    function openModal(resultType, totalScore, bestScore) {
+      modalOverlay.style.display = "flex";
+      modalOverlay.setAttribute("aria-hidden", "false");
 
-      stopTimer();
-      combo = 0;
-      lastCorrectAt = null;
-      stopComboGauge();
+      if (resultType === "clear") {
+        modalTitle.textContent = "クリア！";
+        modalState.textContent = "クリア";
+      } else {
+        modalTitle.textContent = "時間切れ";
+        modalState.textContent = "時間切れ";
+      }
 
-      // 合算スコア = points（＝コンボ/減点を含み、ここで残り秒も加算済み）
-      const totalScore = points;
-
-      const best = getBest();
-      if (best === null || totalScore > best) setBest(totalScore);
-
-      render();
-      alert("クリア！ 合算スコア " + totalScore);
+      modalTotal.textContent = String(totalScore);
+      modalBest.textContent = (bestScore === null) ? "—" : String(bestScore);
+      modalPoints.textContent = String(points);
+      modalRemain.textContent = String(remaining);
+      modalMiss.textContent = String(miss);
     }
 
-    function gameOver() {
-      stopTimer();
-      combo = 0;
-      lastCorrectAt = null;
-      stopComboGauge();
-
-      render();
-      alert("時間切れ（合算スコアはクリア時のみ確定）");
+    function closeModal() {
+      modalOverlay.style.display = "none";
+      modalOverlay.setAttribute("aria-hidden", "true");
     }
 
+    // ===== ゲーム制御 =====
     function resetGame() {
       stopTimer();
+      stopComboGauge();
 
       remaining = GAME_SECONDS;
       expected = 1;
@@ -320,17 +397,97 @@
       points = 0;
       combo = 0;
       lastCorrectAt = null;
-      stopComboGauge();
+      activeComboWindowMs = comboWindowMsByCombo(combo);
+
+      phase = "idle";
+      startBtn.textContent = "開始";
+      startBtn.disabled = false;
 
       clearGrid();
       render();
 
       const best = getBest();
-      bestEl.textContent = best === null ? "—" : String(best);
+      bestEl.textContent = (best === null) ? "—" : String(best);
     }
 
-    startBtn.addEventListener("click", startGame);
-    resetBtn.addEventListener("click", resetGame);
+    function startGame() {
+      // 終了後に「開始」を押したらリセットして新規開始
+      if (phase === "ended") {
+        resetGame();
+      }
+
+      // 念のため、開始時に必要状態を初期化（26問題の根本対策）
+      stopTimer();
+      stopComboGauge();
+      remaining = GAME_SECONDS;
+      expected = 1;
+      miss = 0;
+
+      points = 0;
+      combo = 0;
+      lastCorrectAt = null;
+      activeComboWindowMs = comboWindowMsByCombo(combo);
+
+      buildGrid();
+
+      phase = "running";
+      startBtn.textContent = "実行中";
+      startBtn.disabled = true;
+
+      timerId = setInterval(tick, 1000);
+      render();
+    }
+
+    function finish(type) {
+      // running以外なら二重終了しない
+      if (phase !== "running") return;
+
+      stopTimer();
+      stopComboGauge();
+
+      phase = "ended";
+      startBtn.textContent = "開始（もう一回）";
+      startBtn.disabled = false;
+
+      let totalScore = points;
+      let best = getBest();
+
+      if (type === "clear") {
+        // クリア時：残り秒をそのままポイント加算 → 合算スコア確定
+        totalScore = points + remaining;
+
+        if (best === null || totalScore > best) {
+          setBest(totalScore);
+          best = totalScore;
+        }
+      }
+
+      // ※時間切れ時は「クリア時のみスコア確定」という設計にしています。
+      // もし「時間切れでも totalScore をベスト判定に入れる」なら明示指示が必要です。
+
+      openModal(type, totalScore, best);
+    }
+
+    // ===== イベント =====
+    startBtn.addEventListener("click", () => {
+      // ゲーム中はボタン無効なのでここには来ません
+      startGame();
+    });
+
+    resetBtn.addEventListener("click", () => {
+      closeModal();
+      resetGame();
+    });
+
+    modalCloseBtn.addEventListener("click", () => {
+      closeModal();
+    });
+
+    modalRetryBtn.addEventListener("click", () => {
+      closeModal();
+      resetGame();
+      startGame();
+    });
 
     // init
     resetGame();
