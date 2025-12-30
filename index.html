@@ -135,9 +135,9 @@
     const TIME_PENALTY_SECONDS = 5;
 
     // コンボ加点（コンボ回数に応じて）
-    // combo 1-2: +1, combo 3-4: +2, combo 5+: +5
+    // combo 1-2: +1, combo 3-4: +2, combo 5+: +3
     function comboBonus(comboCount) {
-      if (comboCount >= 5) return 5;
+      if (comboCount >= 5) return 3;
       if (comboCount >= 3) return 2;
       return 1;
     }
