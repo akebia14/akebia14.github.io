@@ -1,1 +1,612 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ステージ無限 1〜N タップゲーム</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; padding: 16px; max-width: 640px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    .ver { font-size: 12px; color:#666; margin: 0 0 12px; }
 
+    .bar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin-bottom: 12px; }
+    .stat { padding: 10px 12px; border: 1px solid #ddd; border-radius: 10px; background: #fafafa; font-size: 14px; }
+    .stat b { font-size: 18px; }
+
+    .controls { display: flex; gap: 8px; margin: 12px 0 16px; flex-wrap: wrap; }
+    button.ctrl { padding: 10px 14px; font-size: 16px; border-radius: 10px; border: 1px solid #ddd; background: #fff; }
+    button.ctrl:disabled { opacity: 0.6; }
+
+    .grid { display: grid; gap: 8px; min-height: 260px; user-select: none; -webkit-user-select: none; }
+    .cell {
+      aspect-ratio: 1 / 1;
+      border-radius: 12px;
+      border: 1px solid #ddd;
+      background: #fff;
+      font-weight: 700;
+      font-size: 18px;
+      line-height: 1;
+      padding: 0;
+    }
+    .cell.correct { background: #e9f7ef; border-color: #b7e4c7; color: #1b4332; }
+    .cell.wrong { background: #fff0f0; border-color: #ffb3b3; color: #7a0000; }
+    .cell:disabled { opacity: 0.6; }
+
+    .gaugeWrap { height:10px; border:1px solid #ddd; border-radius:999px; overflow:hidden; background:#fff; margin-top:6px; }
+    .gaugeBar { height:100%; width:0%; background:#4caf50; }
+
+    .note { font-size: 12px; color: #666; margin-top: 12px; line-height: 1.6; }
+
+    /* Stage overlay */
+    .stageOverlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9998;
+      pointer-events: none;
+    }
+    .stageOverlay .pill {
+      background: rgba(0,0,0,0.75);
+      color: #fff;
+      border-radius: 999px;
+      padding: 10px 18px;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      transform: translateY(0);
+      opacity: 0;
+      transition: opacity 240ms ease, transform 240ms ease;
+    }
+    .stageOverlay.show .pill {
+      opacity: 1;
+      transform: translateY(-4px);
+    }
+
+    /* Modal */
+    .modalOverlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 9999;
+    }
+    .modal {
+      width: min(560px, 100%);
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid #eee;
+      padding: 14px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+    .modal h2 { font-size: 18px; margin: 0 0 10px; }
+    .summary {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 12px;
+      margin-bottom: 12px;
+    }
+    .box {
+      border: 1px solid #eee;
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: #fafafa;
+      font-size: 14px;
+    }
+    .box b { font-size: 18px; }
+    .actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .actions button {
+      padding: 10px 14px;
+      font-size: 14px;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+  <h1>ステージ無限 タップゲーム</h1>
+  <div class="ver">v20251230-infinite-stages-1</div>
+
+  <div class="bar">
+    <div class="stat">残り時間：<b id="time">60</b> 秒</div>
+    <div class="stat">STAGE：<b id="stage">1</b>（<span id="size">5×5</span>）</div>
+
+    <div class="stat">次に押す：<b id="next">1</b></div>
+    <div class="stat">ポイント：<b id="points">0</b></div>
+
+    <div class="stat">コンボ：<b id="combo">0</b></div>
+    <div class="stat">ミス：<b id="miss">0</b></div>
+
+    <div class="stat" style="grid-column: 1 / -1;">
+      コンボ猶予：<b id="comboWindowLabel">2.0</b> 秒（2.0 → 1.5 → 1.0）
+      <div class="gaugeWrap"><div id="comboGauge" class="gaugeBar"></div></div>
+    </div>
+
+    <div class="stat" style="grid-column: 1 / -1;">
+      ベスト：<b id="best">—</b>（到達：<b id="bestStage">—</b>）
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="ctrl" id="startBtn">開始</button>
+    <button class="ctrl" id="resetBtn">リセット</button>
+  </div>
+
+  <div class="grid" id="grid" aria-label="number grid"></div>
+
+  <p class="note">
+    ルール：ステージは無限に進行（5×5→6×5→6×6→…）。ミスで <b>−5秒</b>。<br>
+    コンボ猶予：<b>2.0秒</b> / コンボ3以上 <b>1.5秒</b> / コンボ5以上 <b>1.0秒固定</b>。<br>
+    スコア：コンボ加点（2倍）＋ステージクリアボーナス（<b>STAGE×100</b>）。<br>
+    ※ゲームオーバー時の残り秒はスコアに加算しません。
+  </p>
+
+  <!-- Stage overlay -->
+  <div class="stageOverlay" id="stageOverlay">
+    <div class="pill" id="stagePill">STAGE 1</div>
+  </div>
+
+  <!-- Game Over Modal -->
+  <div class="modalOverlay" id="modalOverlay" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal">
+      <h2 id="modalTitle">ゲームオーバー</h2>
+      <div class="summary">
+        <div class="box">今回スコア：<b id="mScore">0</b></div>
+        <div class="box">今回到達：<b id="mStage">0</b></div>
+        <div class="box">ベストスコア：<b id="mBestScore">—</b></div>
+        <div class="box">ベスト到達：<b id="mBestStage">—</b></div>
+        <div class="box">ミス：<b id="mMiss">0</b></div>
+        <div class="box">最終STAGE：<b id="mFinalStageNo">1</b></div>
+      </div>
+      <div class="actions">
+        <button id="mRetry">もう一回</button>
+        <button id="mClose">閉じる</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== 仕様 =====
+    const GAME_SECONDS = 60;
+    const TIME_PENALTY = 5;
+
+    // ベスト保存（合算スコア＋到達ステージ数）
+    const BEST_KEY = "best_infinite_stage_score_v1";
+
+    // コンボ猶予（ms）：2.0 → 1.5 → 1.0
+    function comboWindowMs(comboCount) {
+      if (comboCount >= 5) return 1000;
+      if (comboCount >= 3) return 1500;
+      return 2000;
+    }
+
+    // コンボ加点（2倍）
+    // ※ 5コンボ以降の基準値は「3」を採用（→2倍で6）。
+    //    あなたが別値にしたい場合はこの関数だけ調整。
+    function comboBonus(comboCount) {
+      const base =
+        (comboCount >= 5) ? 3 :
+        (comboCount >= 3) ? 2 :
+        1;
+      return base * 2;
+    }
+
+    // ステージサイズ：5×5→6×5→6×6→7×6→7×7→…
+    // stageNo=1が5×5、以降は rows/cols を交互に増やす
+    function stageDims(stageNo) {
+      const steps = stageNo - 1;
+      const rows = 5 + Math.ceil(steps / 2);
+      const cols = 5 + Math.floor(steps / 2);
+      return { rows, cols, total: rows * cols };
+    }
+
+    // ===== 状態 =====
+    // phase: "idle" | "running" | "ended"
+    let phase = "idle";
+
+    let remaining = GAME_SECONDS;
+
+    let stageNo = 1;        // 現在プレイ中のステージ番号
+    let stageCleared = 0;   // クリア済みステージ数
+
+    let rows = 5;
+    let cols = 5;
+    let total = 25;
+
+    let expected = 1;
+    let miss = 0;
+    let points = 0;
+
+    // コンボ（ステージ遷移で必ず切る）
+    let combo = 0;
+    let lastCorrectAt = null;      // performance.now()
+    let activeWindow = 2000;
+
+    let timerId = null;
+
+    // ゲージ描画
+    let rafId = null;
+
+    // ===== DOM =====
+    const timeEl = document.getElementById("time");
+    const stageEl = document.getElementById("stage");
+    const sizeEl = document.getElementById("size");
+    const nextEl = document.getElementById("next");
+    const pointsEl = document.getElementById("points");
+    const comboEl = document.getElementById("combo");
+    const missEl = document.getElementById("miss");
+    const comboWindowLabelEl = document.getElementById("comboWindowLabel");
+    const gaugeEl = document.getElementById("comboGauge");
+
+    const bestEl = document.getElementById("best");
+    const bestStageEl = document.getElementById("bestStage");
+
+    const gridEl = document.getElementById("grid");
+    const startBtn = document.getElementById("startBtn");
+    const resetBtn = document.getElementById("resetBtn");
+
+    // overlay
+    const stageOverlay = document.getElementById("stageOverlay");
+    const stagePill = document.getElementById("stagePill");
+
+    // modal
+    const modalOverlay = document.getElementById("modalOverlay");
+    const mScore = document.getElementById("mScore");
+    const mStage = document.getElementById("mStage");
+    const mBestScore = document.getElementById("mBestScore");
+    const mBestStage = document.getElementById("mBestStage");
+    const mMiss = document.getElementById("mMiss");
+    const mFinalStageNo = document.getElementById("mFinalStageNo");
+    const mRetry = document.getElementById("mRetry");
+    const mClose = document.getElementById("mClose");
+
+    // ===== ベスト（JSON保存） =====
+    function getBest() {
+      try {
+        const raw = localStorage.getItem(BEST_KEY);
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        if (typeof obj !== "object" || obj === null) return null;
+        const score = Number(obj.score);
+        const stage = Number(obj.stage);
+        if (!Number.isFinite(score) || !Number.isFinite(stage)) return null;
+        return { score, stage };
+      } catch {
+        return null;
+      }
+    }
+
+    function setBest(score, stage) {
+      localStorage.setItem(BEST_KEY, JSON.stringify({ score, stage }));
+      bestEl.textContent = String(score);
+      bestStageEl.textContent = String(stage);
+    }
+
+    // score優先、同点なら到達（クリア数）で比較
+    function isBetterRecord(newScore, newStage, old) {
+      if (!old) return true;
+      if (newScore > old.score) return true;
+      if (newScore < old.score) return false;
+      return newStage > old.stage;
+    }
+
+    // ===== UI =====
+    function render() {
+      timeEl.textContent = String(remaining);
+      stageEl.textContent = String(stageNo);
+      sizeEl.textContent = `${rows}×${cols}`;
+      nextEl.textContent = String(expected);
+      pointsEl.textContent = String(points);
+      comboEl.textContent = String(combo);
+      missEl.textContent = String(miss);
+      comboWindowLabelEl.textContent = (activeWindow / 1000).toFixed(1);
+    }
+
+    function showStageOverlay(n) {
+      stagePill.textContent = `STAGE ${n}`;
+      stageOverlay.style.display = "flex";
+      // 強制reflowしてからshow
+      stageOverlay.offsetHeight; // eslint-disable-line no-unused-expressions
+      stageOverlay.classList.add("show");
+      setTimeout(() => {
+        stageOverlay.classList.remove("show");
+        setTimeout(() => { stageOverlay.style.display = "none"; }, 260);
+      }, 700);
+    }
+
+    function openModal(finalScore, finalStageCleared) {
+      const best = getBest();
+      modalOverlay.style.display = "flex";
+      modalOverlay.setAttribute("aria-hidden", "false");
+
+      mScore.textContent = String(finalScore);
+      mStage.textContent = String(finalStageCleared);
+      mMiss.textContent = String(miss);
+      mFinalStageNo.textContent = String(stageNo);
+
+      mBestScore.textContent = best ? String(best.score) : "—";
+      mBestStage.textContent = best ? String(best.stage) : "—";
+    }
+
+    function closeModal() {
+      modalOverlay.style.display = "none";
+      modalOverlay.setAttribute("aria-hidden", "true");
+    }
+
+    // ===== コンボゲージ =====
+    function stopGauge() {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = null;
+      gaugeEl.style.width = "0%";
+    }
+
+    function startGauge() {
+      if (rafId !== null) return;
+
+      const loop = () => {
+        if (phase !== "running" || lastCorrectAt === null) {
+          stopGauge();
+          return;
+        }
+        const now = performance.now();
+        const remainMs = Math.max(0, activeWindow - (now - lastCorrectAt));
+        const pct = (remainMs / activeWindow) * 100;
+        gaugeEl.style.width = pct.toFixed(2) + "%";
+
+        if (remainMs === 0) {
+          // 猶予切れ＝コンボ終了（次の正解から新チェーン）
+          combo = 0;
+          lastCorrectAt = null;
+          activeWindow = comboWindowMs(combo);
+          render();
+          stopGauge();
+          return;
+        }
+        rafId = requestAnimationFrame(loop);
+      };
+
+      rafId = requestAnimationFrame(loop);
+    }
+
+    // ===== 盤面 =====
+    function shuffle(a) {
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    function buildGrid() {
+      gridEl.innerHTML = "";
+      gridEl.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+      // 数字
+      const nums = shuffle(Array.from({ length: total }, (_, i) => i + 1));
+
+      // 盤面が大きくなると文字が詰むので簡易的に調整（閾値のみ）
+      // ※仕様変更ではなくUI崩れ回避目的
+      const font =
+        (cols >= 9 || rows >= 9) ? 14 :
+        (cols >= 8 || rows >= 8) ? 16 :
+        18;
+
+      for (const n of nums) {
+        const b = document.createElement("button");
+        b.className = "cell";
+        b.type = "button";
+        b.textContent = String(n);
+        b.style.fontSize = font + "px";
+
+        b.addEventListener("click", () => {
+          if (phase !== "running") return;
+
+          if (n === expected) {
+            // 正解
+            b.classList.add("correct");
+            b.disabled = true;
+
+            const now = performance.now();
+            if (lastCorrectAt !== null && (now - lastCorrectAt) <= activeWindow) {
+              combo += 1;
+              points += comboBonus(combo);
+            } else {
+              combo = 0;
+            }
+
+            lastCorrectAt = now;
+            activeWindow = comboWindowMs(combo);
+            startGauge();
+
+            expected += 1;
+            render();
+
+            if (expected === total + 1) {
+              onStageClear();
+            }
+          } else {
+            // ミス
+            miss += 1;
+            remaining = Math.max(0, remaining - TIME_PENALTY);
+
+            // ステージ制：ミスでポイント減点しない（確定仕様）
+            // コンボは切る
+            combo = 0;
+            lastCorrectAt = null;
+            activeWindow = comboWindowMs(combo);
+            stopGauge();
+
+            render();
+
+            // 振動（端末/ブラウザ仕様に依存）
+            if (navigator.vibrate) navigator.vibrate(30);
+
+            b.classList.add("wrong");
+            setTimeout(() => b.classList.remove("wrong"), 180);
+
+            if (remaining === 0) gameOver();
+          }
+        });
+
+        gridEl.appendChild(b);
+      }
+    }
+
+    // ===== ステージ進行 =====
+    function cutCombo() {
+      combo = 0;
+      lastCorrectAt = null;
+      activeWindow = comboWindowMs(combo);
+      stopGauge();
+    }
+
+    function onStageClear() {
+      // クリア済み数を加算
+      stageCleared += 1;
+
+      // ステージクリアボーナス：Stage数×100（クリアしたステージ番号）
+      points += stageNo * 100;
+
+      // 次ステージへ（コンボは切る）
+      cutCombo();
+
+      stageNo += 1;
+      const d = stageDims(stageNo);
+      rows = d.rows;
+      cols = d.cols;
+      total = d.total;
+
+      expected = 1;
+
+      showStageOverlay(stageNo);
+      buildGrid();
+      render();
+    }
+
+    // ===== タイマー =====
+    function stopTimer() {
+      if (timerId !== null) clearInterval(timerId);
+      timerId = null;
+    }
+
+    function tick() {
+      remaining -= 1;
+      if (remaining <= 0) {
+        remaining = 0;
+        render();
+        gameOver();
+        return;
+      }
+      render();
+    }
+
+    // ===== ゲーム制御 =====
+    function applyStage(stageNumber) {
+      stageNo = stageNumber;
+      const d = stageDims(stageNo);
+      rows = d.rows;
+      cols = d.cols;
+      total = d.total;
+    }
+
+    function resetGameState() {
+      stopTimer();
+      cutCombo();
+
+      remaining = GAME_SECONDS;
+      miss = 0;
+      points = 0;
+
+      stageCleared = 0;
+      applyStage(1);
+
+      expected = 1;
+
+      gridEl.innerHTML = "";
+      startBtn.textContent = "開始";
+      startBtn.disabled = false;
+      phase = "idle";
+
+      const best = getBest();
+      bestEl.textContent = best ? String(best.score) : "—";
+      bestStageEl.textContent = best ? String(best.stage) : "—";
+
+      render();
+    }
+
+    function startGame() {
+      // 終了後の開始は完全リセット（確定仕様）
+      if (phase === "ended") {
+        closeModal();
+        resetGameState();
+      }
+
+      // idleから開始
+      if (phase !== "idle") return;
+
+      phase = "running";
+      startBtn.textContent = "実行中";
+      startBtn.disabled = true;
+
+      // 初回ステージ表示
+      showStageOverlay(stageNo);
+
+      buildGrid();
+      render();
+
+      timerId = setInterval(tick, 1000);
+    }
+
+    function gameOver() {
+      if (phase !== "running") return;
+
+      stopTimer();
+      cutCombo();
+
+      phase = "ended";
+      startBtn.textContent = "開始（もう一回）";
+      startBtn.disabled = false;
+
+      // スコア確定：pointsのみ（残り秒は加算しない確定仕様）
+      const finalScore = points;
+      const finalStageCleared = stageCleared;
+
+      const best = getBest();
+      if (isBetterRecord(finalScore, finalStageCleared, best)) {
+        setBest(finalScore, finalStageCleared);
+      }
+
+      render();
+      openModal(finalScore, finalStageCleared);
+    }
+
+    // ===== イベント =====
+    startBtn.addEventListener("click", startGame);
+
+    resetBtn.addEventListener("click", () => {
+      closeModal();
+      resetGameState();
+    });
+
+    mRetry.addEventListener("click", () => {
+      closeModal();
+      resetGameState();
+      startGame();
+    });
+
+    mClose.addEventListener("click", closeModal);
+
+    // init
+    resetGameState();
+  </script>
+</body>
+</html>
