@@ -19,7 +19,6 @@
     <section class="panel">
       <div class="row">
       <button id="btnNew">新規開始</button>
-      <button id="btnDraw" disabled>ツモ</button>
       <button id="btnRiichi" disabled>リーチ</button>
       <button id="btnAnkan" disabled>暗槓</button>
       <button id="btnWin" disabled>上がる（ツモ）</button>
@@ -51,8 +50,17 @@
       </div>
 
       <div class="box">
-        <div class="boxTitle">捨て牌</div>
-        <div id="discards" class="tiles discards"></div>
+      <div class="boxTitle">手牌（クリックで捨て牌）</div>
+    
+      <div class="handRow">
+        <div id="hand" class="tiles hand"></div>
+        <div class="drawnCol">
+          <div class="drawnLabel">ツモ</div>
+          <div id="drawn" class="tiles drawn"></div>
+        </div>
+      </div>
+    
+      <div class="hint">※ ツモ牌は右に表示。捨て牌後に理牌して次の自動ツモに進みます。</div>
       </div>
 
       <div class="box">
