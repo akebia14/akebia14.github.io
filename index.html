@@ -5,229 +5,200 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>1〜25 タップゲーム</title>
   <style>
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      padding: 16px;
-      max-width: 520px;
-      margin: 0 auto;
-    }
-    h1 { font-size: 20px; margin-bottom: 12px; }
+    body { font-family: system-ui, -apple-system, sans-serif; padding: 16px; max-width: 520px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    .ver { font-size: 12px; color:#666; margin: 0 0 12px; }
 
-    .bar {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px 12px;
-      margin-bottom: 12px;
-    }
-    .stat {
-      padding: 10px 12px;
-      border: 1px solid #ddd;
-      border-radius: 10px;
-      background: #fafafa;
-      font-size: 14px;
-    }
+    .bar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin-bottom: 12px; }
+    .stat { padding: 10px 12px; border: 1px solid #ddd; border-radius: 10px; background: #fafafa; font-size: 14px; }
     .stat b { font-size: 18px; }
 
-    .controls {
-      display: flex;
-      gap: 8px;
-      margin: 12px 0 16px;
-    }
-    button.ctrl {
-      padding: 10px 14px;
-      font-size: 16px;
-      border-radius: 10px;
-      border: 1px solid #ddd;
-      background: #fff;
-    }
+    .controls { display: flex; gap: 8px; margin: 12px 0 16px; }
+    button.ctrl { padding: 10px 14px; font-size: 16px; border-radius: 10px; border: 1px solid #ddd; background: #fff; }
 
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 8px;
-      min-height: 260px;
-      user-select: none;
-    }
-    .cell {
-      aspect-ratio: 1 / 1;
-      border-radius: 12px;
-      border: 1px solid #ddd;
-      background: #fff;
-      font-size: 18px;
-      font-weight: 700;
-    }
-    .cell.correct {
-      background: #e9f7ef;
-      border-color: #b7e4c7;
-      color: #1b4332;
-    }
-    .cell.wrong {
-      background: #fff0f0;
-      border-color: #ffb3b3;
-      color: #7a0000;
-    }
+    .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; min-height: 260px; user-select: none; -webkit-user-select: none; }
+    .cell { aspect-ratio: 1 / 1; border-radius: 12px; border: 1px solid #ddd; background: #fff; font-size: 18px; font-weight: 700; }
+    .cell.correct { background: #e9f7ef; border-color: #b7e4c7; color: #1b4332; }
+    .cell.wrong { background: #fff0f0; border-color: #ffb3b3; color: #7a0000; }
     .cell:disabled { opacity: 0.6; }
 
-    .note {
-      font-size: 12px;
-      color: #666;
-      margin-top: 12px;
-      line-height: 1.5;
-    }
+    .note { font-size: 12px; color: #666; margin-top: 12px; line-height: 1.5; }
   </style>
 </head>
 <body>
+  <h1>1〜25 タップゲーム（ミスで−5秒）</h1>
+  <div class="ver">v20251230-1（この表示が出ていれば最新版HTMLです）</div>
 
-<h1>1〜25 タップゲーム</h1>
+  <div class="bar">
+    <div class="stat">残り時間：<b id="time">60</b> 秒</div>
+    <div class="stat">次に押す数字：<b id="next">1</b></div>
+    <div class="stat">ミス：<b id="miss">0</b> 回</div>
+    <div class="stat">ベスト（残り秒）：<b id="best">—</b></div>
+  </div>
 
-<div class="bar">
-  <div class="stat">残り時間：<b id="time">60</b> 秒</div>
-  <div class="stat">次に押す数字：<b id="next">1</b></div>
-  <div class="stat">ベスト残り秒：<b id="best">—</b></div>
-  <div class="stat">ミス：<b id="miss">0</b></div>
-</div>
+  <div class="controls">
+    <button class="ctrl" id="startBtn">開始</button>
+    <button class="ctrl" id="resetBtn">リセット</button>
+  </div>
 
-<div class="controls">
-  <button class="ctrl" id="startBtn">開始</button>
-  <button class="ctrl" id="resetBtn">リセット</button>
-</div>
+  <div class="grid" id="grid" aria-label="number grid"></div>
 
-<div class="grid" id="grid"></div>
+  <p class="note">
+    ルール：1→25を順にタップ。ミスで残り時間 −5 秒。<br>
+    スコア：25まで到達したときの「残り秒数」。ベストは端末内保存です。
+  </p>
 
-<p class="note">
-  ルール：1→25を順にタップ。ミスで −5 秒。<br>
-  ※ iOSブラウザでは振動APIが動作しません（仕様）。
-</p>
+  <script>
+    // ===== 仕様 =====
+    const GAME_SECONDS = 60;
+    const PENALTY_SECONDS = 5;
+    const BEST_KEY = "best_remaining_seconds_clear_only";
 
-<script>
-  const GAME_SECONDS = 60;
-  const PENALTY_SECONDS = 5;
-  const BEST_KEY = "best_remaining_seconds";
+    // ===== 状態 =====
+    let remaining = GAME_SECONDS;
+    let expected = 1;
+    let miss = 0;
+    let timerId = null;
+    let running = false;
 
-  let remaining = GAME_SECONDS;
-  let expected = 1;
-  let miss = 0;
-  let timerId = null;
-  let running = false;
+    // ===== DOM =====
+    const timeEl = document.getElementById("time");
+    const nextEl = document.getElementById("next");
+    const missEl = document.getElementById("miss");
+    const bestEl = document.getElementById("best");
+    const gridEl = document.getElementById("grid");
+    const startBtn = document.getElementById("startBtn");
+    const resetBtn = document.getElementById("resetBtn");
 
-  const timeEl = document.getElementById("time");
-  const nextEl = document.getElementById("next");
-  const missEl = document.getElementById("miss");
-  const bestEl = document.getElementById("best");
-  const gridEl = document.getElementById("grid");
-  const startBtn = document.getElementById("startBtn");
-  const resetBtn = document.getElementById("resetBtn");
-
-  function render() {
-    timeEl.textContent = remaining;
-    nextEl.textContent = expected;
-    missEl.textContent = miss;
-  }
-
-  function getBest() {
-    const v = Number(localStorage.getItem(BEST_KEY));
-    return Number.isFinite(v) ? v : null;
-  }
-
-  function setBest(v) {
-    localStorage.setItem(BEST_KEY, String(v));
-    bestEl.textContent = v;
-  }
-
-  function shuffle(arr) {
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
+    function render() {
+      timeEl.textContent = String(remaining);
+      nextEl.textContent = String(expected);
+      missEl.textContent = String(miss);
     }
-    return arr;
-  }
 
-  function buildGrid() {
-    gridEl.innerHTML = "";
-    const nums = shuffle([...Array(25)].map((_, i) => i + 1));
+    function getBest() {
+      const v = Number(localStorage.getItem(BEST_KEY));
+      return Number.isFinite(v) ? v : null;
+    }
 
-    nums.forEach(n => {
-      const btn = document.createElement("button");
-      btn.className = "cell";
-      btn.textContent = n;
+    function setBest(v) {
+      localStorage.setItem(BEST_KEY, String(v));
+      bestEl.textContent = String(v);
+    }
 
-      btn.addEventListener("click", () => {
-        if (!running) return;
+    // Fisher–Yates shuffle
+    function shuffle(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
 
-        if (n === expected) {
-          btn.classList.add("correct");
-          btn.disabled = true;
-          expected++;
-          render();
+    function clearGrid() {
+      gridEl.innerHTML = "";
+    }
 
-          if (expected === 26) finish();
-        } else {
-          miss++;
-          remaining = Math.max(0, remaining - PENALTY_SECONDS);
-          render();
+    function buildGrid() {
+      clearGrid();
+      const nums = shuffle(Array.from({ length: 25 }, (_, i) => i + 1));
 
-          btn.classList.add("wrong");
-          setTimeout(() => btn.classList.remove("wrong"), 180);
+      for (const n of nums) {
+        const btn = document.createElement("button");
+        btn.className = "cell";
+        btn.type = "button";
+        btn.textContent = String(n);
 
-          if (remaining === 0) gameOver();
-        }
-      });
+        btn.addEventListener("click", () => {
+          if (!running) return;
 
-      gridEl.appendChild(btn);
-    });
-  }
+          if (n === expected) {
+            btn.classList.add("correct");
+            btn.disabled = true;
+            expected += 1;
+            render();
 
-  function tick() {
-    remaining--;
-    if (remaining <= 0) gameOver();
-    else render();
-  }
+            if (expected === 26) finish(); // 25まで押し切った
+          } else {
+            miss += 1;
+            remaining = Math.max(0, remaining - PENALTY_SECONDS);
+            render();
 
-  function startGame() {
-    if (running) return;
-    buildGrid();
-    running = true;
-    startBtn.disabled = true;
-    timerId = setInterval(tick, 1000);
-  }
+            // ミス時フィードバック（振動は端末/ブラウザ仕様に依存）
+            if (navigator.vibrate) navigator.vibrate(30);
 
-  function finish() {
-    clearInterval(timerId);
-    running = false;
-    startBtn.disabled = false;
+            btn.classList.add("wrong");
+            setTimeout(() => btn.classList.remove("wrong"), 180);
 
-    const best = getBest();
-    if (best === null || remaining > best) setBest(remaining);
+            if (remaining === 0) gameOver();
+          }
+        });
 
-    alert("クリア！ 残り " + remaining + " 秒");
-  }
+        gridEl.appendChild(btn);
+      }
+    }
 
-  function gameOver() {
-    clearInterval(timerId);
-    running = false;
-    startBtn.disabled = false;
-    alert("時間切れ");
-  }
+    function tick() {
+      remaining -= 1;
+      if (remaining <= 0) {
+        remaining = 0;
+        render();
+        gameOver();
+        return;
+      }
+      render();
+    }
 
-  function resetGame() {
-    clearInterval(timerId);
-    remaining = GAME_SECONDS;
-    expected = 1;
-    miss = 0;
-    running = false;
-    startBtn.disabled = false;
-    gridEl.innerHTML = "";
-    render();
+    function startGame() {
+      if (running) return;
 
-    const best = getBest();
-    bestEl.textContent = best === null ? "—" : best;
-  }
+      // 開始時に盤面生成
+      buildGrid();
 
-  startBtn.addEventListener("click", startGame);
-  resetBtn.addEventListener("click", resetGame);
+      running = true;
+      startBtn.disabled = true;
+      timerId = setInterval(tick, 1000);
+    }
 
-  resetGame();
-</script>
+    function stopTimer() {
+      if (timerId !== null) clearInterval(timerId);
+      timerId = null;
+      running = false;
+      startBtn.disabled = false;
+    }
 
+    function finish() {
+      stopTimer();
+
+      // クリア時のみ「残り秒」をベスト保存（大きいほど良い）
+      const best = getBest();
+      if (best === null || remaining > best) setBest(remaining);
+
+      alert("クリア！ 残り " + remaining + " 秒（ベスト更新判定あり）");
+    }
+
+    function gameOver() {
+      stopTimer();
+      alert("時間切れ");
+    }
+
+    function resetGame() {
+      stopTimer();
+      remaining = GAME_SECONDS;
+      expected = 1;
+      miss = 0;
+      clearGrid();
+      render();
+
+      const best = getBest();
+      bestEl.textContent = best === null ? "—" : String(best);
+    }
+
+    startBtn.addEventListener("click", startGame);
+    resetBtn.addEventListener("click", resetGame);
+
+    // init
+    resetGame();
+  </script>
 </body>
 </html>
