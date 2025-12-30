@@ -1,15 +1,17 @@
-/* app.js (solo-riichi MVP+)
- * - 新規開始：親（東）固定、場風も東固定（翻牌判定用）
- * - ツモ上限：20（ライブ山からの通常ツモ回数。嶺上ツモは別枠で増やさない仕様）
- * - 暗槓：手牌に4枚あるときに実行可。嶺上牌を王牌からツモ。
- * - リーチ：テンパイ時のみ宣言可。第一巡（初回捨て牌前）ならダブルリーチ扱い。
+/* app.js
+ * UI変更版：
+ * - ツモは自動
+ * - ツモ牌は右側に別表示（手牌13枚のまま）
+ * - 捨て牌後に理牌して、0.2秒後に次の自動ツモ
  */
 
 (() => {
   const GAME_MAX_DRAWS = 20;
+  const AUTO_DRAW_DELAY_MS = 200;
 
   const $ = (id) => document.getElementById(id);
   const elHand = $("hand");
+  const elDrawn = $("drawn");
   const elDiscards = $("discards");
   const elLog = $("log");
   const elDrawCount = $("drawCount");
@@ -18,7 +20,6 @@
   const elDora = $("doraTile");
 
   const btnNew = $("btnNew");
-  const btnDraw = $("btnDraw");
   const btnWin = $("btnWin");
   const btnRiichi = $("btnRiichi");
   const btnAnkan = $("btnAnkan");
@@ -53,6 +54,19 @@
     }
   }
 
+  function renderSingleTile(container, t, { clickable, onClick } = {}) {
+    container.innerHTML = "";
+    if (!t) return;
+    const img = document.createElement("img");
+    img.alt = t;
+    img.src = tileToImgSrc(t);
+    if (clickable) {
+      img.addEventListener("click", () => onClick(t));
+      img.title = `捨てる: ${t}（ツモ切り）`;
+    }
+    container.appendChild(img);
+  }
+
   function shuffle(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -72,63 +86,34 @@
     return shuffle(tiles);
   }
 
-  function newGame() {
-    elLog.textContent = "";
-    const wallAll = buildWall();
+  function deadWallIndicesForKandora(n) {
+    const base = 6 + (n - 1) * 2;
+    return { ind: base, ura: base + 1 };
+  }
 
-    // dead wall 14
-    const deadWall = wallAll.splice(-14);
+  function current14() {
+    if (!state || !state.drawn) return null;
+    return MahHack.sortTiles([...state.hand, state.drawn]); // 和了判定用（表示とは独立）
+  }
 
-    // dora indicator positions:
-    // MVP固定：死に王牌[4]が表ドラ表示、裏は対応する“裏”として[5]を保持（和了時にのみ公開/加算）
-    // kandoraは順次、[6],[8],[10]...（表示）と、その裏として次インデックスを保持する（MVP固定ルール）
-    const doraIndicators = [deadWall[4]];
-    const uraIndicators = [deadWall[5]];
-    const doraTiles = [MahHack.nextDoraFromIndicator(deadWall[4])];
-
-    const hand = [];
-    for (let i = 0; i < 13; i++) hand.push(wallAll.shift());
-
-    state = {
-      wall: wallAll,          // live wall
-      deadWall,              // dead wall pool
-      doraIndicators,
-      uraIndicators,
-      doraTiles,
-      kanCount: 0,
-      hand: MahHack.sortTiles(hand),
-      discards: [],
-      draws: 0,              // live-wall draws count only
-      hasDrawnThisTurn: false,
-      lastDraw: null,
-      riichi: false,
-      doubleRiichi: false,
-      riichiTurnLocked: false,
-      riichiDeclaredBeforeFirstDiscard: false,
-      turn: 0,               // increment on each draw action (live or rinshan) for UI
-      seatWind: "東",
-      roundWind: "東",
-      lastWinTile: null,
-      lastWinFrom: null,     // 'live'|'rinshan'
-    };
-
-    btnDraw.disabled = false;
-    btnWin.disabled = true;
-    btnRiichi.disabled = true;
-    btnAnkan.disabled = true;
-
-    render();
-    log("新規開始：配牌13枚（親/場風=東 固定）");
-    log(`ドラ表示牌: ${state.doraIndicators[0]} / ドラ: ${state.doraTiles[0]}`);
+  function scheduleAutoDraw() {
+    if (!state) return;
+    if (state.isEnded) return;
+    if (state.drawn) return; // まだ捨ててない
+    clearTimeout(state.autoTimer);
+    state.autoTimer = setTimeout(() => {
+      autoDrawFromLive();
+    }, AUTO_DRAW_DELAY_MS);
   }
 
   function canRiichiNow() {
     if (!state) return false;
     if (state.riichi) return false;
-    if (!state.hasDrawnThisTurn) return false;
-    // テンパイ条件：どれか1枚捨てた後、13枚がテンパイ（待ちが1枚以上）
-    for (let i = 0; i < state.hand.length; i++) {
-      const tmp = state.hand.slice();
+    if (!state.drawn) return false; // ツモってから
+    // 14枚から1枚捨てた後にテンパイか
+    const tiles14 = [...state.hand, state.drawn];
+    for (let i = 0; i < tiles14.length; i++) {
+      const tmp = tiles14.slice();
       tmp.splice(i, 1);
       const waits = MahHack.winningTilesFor13(tmp);
       if (waits.length > 0) return true;
@@ -137,9 +122,9 @@
   }
 
   function hasAnkanCandidate() {
-    if (!state || !state.hasDrawnThisTurn) return false;
-    const c = MahHack.countTiles(state.hand);
-    for (const [k, v] of c.entries()) if (v >= 4) return true;
+    if (!state || !state.drawn) return false;
+    const c = MahHack.countTiles([...state.hand, state.drawn]);
+    for (const [, v] of c.entries()) if (v >= 4) return true;
     return false;
   }
 
@@ -149,127 +134,135 @@
     renderTiles(elDoraInd, state.doraIndicators);
     renderTiles(elDora, state.doraTiles);
 
+    // 手牌13枚：捨て可（ツモ後のみ）
     renderTiles(elHand, state.hand, {
-      clickable: state.hasDrawnThisTurn,
-      onClick: (idx, t) => discard(idx, t),
+      clickable: !!state.drawn,
+      onClick: (idx, t) => discardFromHand(idx, t),
     });
+
+    // ツモ牌：捨て可（ツモ切り）
+    renderSingleTile(elDrawn, state.drawn, {
+      clickable: !!state.drawn,
+      onClick: (t) => discardDrawn(t),
+    });
+
     renderTiles(elDiscards, state.discards);
 
     elDrawCount.textContent = `ツモ ${state.draws} / ${GAME_MAX_DRAWS}`;
     elWallCount.textContent = `山 ${state.wall.length}`;
 
-    const canWin = state.hasDrawnThisTurn && MahHack.isAgari(state.hand);
+    // 和了は14枚揃っている時のみ
+    const canWin = !!state.drawn && MahHack.isAgari([...state.hand, state.drawn]);
     btnWin.disabled = !canWin;
 
     btnRiichi.disabled = !canRiichiNow();
-    btnAnkan.disabled = !(hasAnkanCandidate());
-
-    if (!state.hasDrawnThisTurn) {
-      // ツモ前
-    }
+    btnAnkan.disabled = !hasAnkanCandidate();
   }
 
-  function drawFromLive() {
+  function endHand(msg) {
     if (!state) return;
-    if (state.hasDrawnThisTurn) { log("エラー：捨て牌前に連続ツモはできません"); return; }
-    if (state.draws >= GAME_MAX_DRAWS) { log("流局：ツモ上限に到達"); endHand(); return; }
-    if (state.wall.length <= 0) { log("流局：山切れ"); endHand(); return; }
+    state.isEnded = true;
+    clearTimeout(state.autoTimer);
+    if (msg) log(msg);
+    btnWin.disabled = true;
+    btnRiichi.disabled = true;
+    btnAnkan.disabled = true;
+  }
+
+  function newGame() {
+    elLog.textContent = "";
+    const wallAll = buildWall();
+    const deadWall = wallAll.splice(-14);
+
+    const doraIndicators = [deadWall[4]];
+    const uraIndicators = [deadWall[5]];
+    const doraTiles = [MahHack.nextDoraFromIndicator(deadWall[4])];
+
+    const hand = [];
+    for (let i = 0; i < 13; i++) hand.push(wallAll.shift());
+
+    state = {
+      wall: wallAll,
+      deadWall,
+      doraIndicators,
+      uraIndicators,
+      doraTiles,
+      kanCount: 0,
+
+      hand: MahHack.sortTiles(hand), // 初期は理牌してOK（好みで無理牌にも可能）
+      drawn: null,                   // ツモ牌は別枠
+      discards: [],
+
+      draws: 0,                      // live wall draw count only
+      lastDraw: null,
+      lastWinFrom: null,             // 'live'|'rinshan'
+      isEnded: false,
+      autoTimer: null,
+
+      riichi: false,
+      doubleRiichi: false,
+      riichiTurnLocked: false,
+
+      seatWind: "東",
+      roundWind: "東",
+    };
+
+    log("新規開始：配牌13枚（親/場風=東 固定）");
+    log(`ドラ表示牌: ${state.doraIndicators[0]} / ドラ: ${state.doraTiles[0]}`);
+
+    render();
+
+    // 初手ツモは自動
+    scheduleAutoDraw();
+  }
+
+  function autoDrawFromLive() {
+    if (!state || state.isEnded) return;
+    if (state.drawn) return; // 捨ててない
+    if (state.draws >= GAME_MAX_DRAWS) return endHand("流局：ツモ上限に到達");
+    if (state.wall.length <= 0) return endHand("流局：山切れ");
 
     const t = state.wall.shift();
-    state.hand.push(t);
-    state.hand = MahHack.sortTiles(state.hand);
-
+    state.drawn = t;
     state.draws += 1;
-    state.turn += 1;
-    state.hasDrawnThisTurn = true;
     state.lastDraw = t;
     state.lastWinFrom = "live";
 
     log(`ツモ(${state.draws}): ${t}`);
 
-    // 海底：live wall が残り0の状態でツモった場合、そのツモで和了なら海底 :contentReference[oaicite:52]{index=52}
-    // 判定は win() 側で行う（ctx.haitei=true）
+    // ツモ後に和了形なら「上がる」ボタンが有効化される
     render();
   }
 
-  function deadWallIndicesForKandora(n) {
-    // MVP固定：表ドラ(4)、裏(5) を使ったあと、カンドラ表示は 6,8,10,12（最大4槓想定）
-    // 裏はそれぞれ +1
-    const base = 6 + (n - 1) * 2;
-    return { ind: base, ura: base + 1 };
-  }
-
-  function ankan() {
-    if (!state || !state.hasDrawnThisTurn) return;
-    const c = MahHack.countTiles(state.hand);
-    const candidates = [...c.entries()].filter(([k, v]) => v >= 4).map(([k]) => k);
-    if (candidates.length === 0) return;
-
-    // MVP：候補が複数ある場合、最初の候補を暗槓（UI選択は次段階）
-    const tile = candidates[0];
-
-    // remove 4 tiles
-    let removed = 0;
-    state.hand = state.hand.filter(t => {
-      if (t === tile && removed < 4) { removed++; return false; }
-      return true;
-    });
-
-    state.kanCount += 1;
-
-    // kandora indicator reveal immediately (rule choice; see Kan timing variations) :contentReference[oaicite:53]{index=53}
-    const idx = deadWallIndicesForKandora(state.kanCount);
-    const ind = state.deadWall[idx.ind];
-    const uraInd = state.deadWall[idx.ura];
-    if (!ind || !uraInd) {
-      log("エラー：死に王牌が不足（カン上限に到達）");
-      endHand();
-      return;
-    }
-    state.doraIndicators.push(ind);
-    state.uraIndicators.push(uraInd);
-    state.doraTiles.push(MahHack.nextDoraFromIndicator(ind));
-
-    log(`暗槓: ${tile}（カンドラ表示牌追加: ${ind} / ドラ: ${MahHack.nextDoraFromIndicator(ind)}）`);
-
-    // rinshan draw: draw 1 from dead wall tail (MVP：deadWall末尾から取得)
-    // rinshan yaku is event-based, applied if win on this draw :contentReference[oaicite:54]{index=54}
-    const rinshanTile = state.deadWall.pop();
-    if (!rinshanTile) {
-      log("流局：王牌不足");
-      endHand();
-      return;
-    }
-    state.hand.push(rinshanTile);
+  function afterDiscardCommon(discardedTile) {
+    // 捨て牌後に理牌
     state.hand = MahHack.sortTiles(state.hand);
-    state.lastDraw = rinshanTile;
-    state.lastWinFrom = "rinshan";
+    state.drawn = null;
 
-    log(`嶺上ツモ: ${rinshanTile}`);
-
-    // 暗槓後は「捨て牌が必要」なので hasDrawnThisTurn 維持
-    state.hasDrawnThisTurn = true;
+    log(`捨て: ${discardedTile}`);
     render();
+
+    // 20回目を捨て終わった時点で未和了なら流局
+    if (state.draws >= GAME_MAX_DRAWS) {
+      return endHand("流局：20ツモ終了時点で和了なし");
+    }
+
+    // 次ツモを自動（0.2秒後）
+    scheduleAutoDraw();
   }
 
-  function discard(idx, t) {
-    if (!state || !state.hasDrawnThisTurn) return;
+  function discardFromHand(idx, t) {
+    if (!state || state.isEnded) return;
+    if (!state.drawn) return; // ツモってないのに捨てない
 
-    // リーチ後の打牌制約（厳密ルールは実装差が出るため、今回は制約をかけない＝採用仕様）
-    // ※ここで「リーチ後は基本ツモ切りのみ」等の制約を入れることも可能
-
+    // 14枚のうち「手牌側」を捨てる：ツモ牌は手牌に取り込む→その後理牌
     state.hand.splice(idx, 1);
-    state.discards.push(t);
-    state.hand = MahHack.sortTiles(state.hand);
-    state.hasDrawnThisTurn = false;
+    state.hand.push(state.drawn);
 
-    log(`捨て: ${t}`);
-
-    // リーチ宣言成立：捨て牌後の13枚がテンパイであること
+    // リーチ成立判定（宣言後に捨ててテンパイであること）
     if (state.riichiTurnLocked) {
       const waits = MahHack.winningTilesFor13(state.hand);
       if (waits.length === 0) {
-        // 不成立
         log("リーチ不成立：捨て牌後がテンパイではありません（宣言を取消）");
         state.riichi = false;
         state.doubleRiichi = false;
@@ -279,18 +272,35 @@
       state.riichiTurnLocked = false;
     }
 
-    // 20ツモ到達後に捨ててまだ和了していないなら流局
-    if (state.draws >= GAME_MAX_DRAWS) {
-      log("流局：ツモ上限に到達（和了なし）");
-      endHand();
+    afterDiscardCommon(t);
+  }
+
+  function discardDrawn(t) {
+    if (!state || state.isEnded) return;
+    if (!state.drawn) return;
+    if (t !== state.drawn) return;
+
+    // ツモ切り：手牌はそのまま、ツモ牌だけ捨てる→理牌
+    // リーチ成立判定（宣言後に捨ててテンパイであること）
+    if (state.riichiTurnLocked) {
+      const waits = MahHack.winningTilesFor13(state.hand);
+      if (waits.length === 0) {
+        log("リーチ不成立：捨て牌後がテンパイではありません（宣言を取消）");
+        state.riichi = false;
+        state.doubleRiichi = false;
+      } else {
+        log(`リーチ成立：待ち=${waits.join(" ")}`);
+      }
+      state.riichiTurnLocked = false;
     }
-    render();
+
+    afterDiscardCommon(t);
   }
 
   function declareRiichi() {
     if (!canRiichiNow()) return;
 
-    // 第一巡（最初の捨て牌前）のリーチをダブルリーチ扱い :contentReference[oaicite:55]{index=55}
+    // 第一巡（最初の捨て牌前）のリーチをダブルリーチ扱い 
     const beforeFirstDiscard = state.discards.length === 0;
     state.riichi = true;
     state.doubleRiichi = beforeFirstDiscard;
@@ -300,25 +310,72 @@
     render();
   }
 
-  function endHand() {
-    btnDraw.disabled = true;
-    btnWin.disabled = true;
-    btnRiichi.disabled = true;
-    btnAnkan.disabled = true;
+  function ankan() {
+    if (!state || state.isEnded) return;
+    if (!state.drawn) return;
+
+    const tiles14 = [...state.hand, state.drawn];
+    const c = MahHack.countTiles(tiles14);
+    const candidates = [...c.entries()].filter(([, v]) => v >= 4).map(([k]) => k);
+    if (candidates.length === 0) return;
+
+    // MVP：複数候補がある場合、先頭を自動採用（後でUI選択に拡張）
+    const tile = candidates[0];
+
+    // 手牌13 + ツモ1 から4枚抜く
+    let removed = 0;
+    const remain = [];
+    for (const t of tiles14) {
+      if (t === tile && removed < 4) { removed++; continue; }
+      remain.push(t);
+    }
+    // 暗槓後は 10枚（面子として4枚固定）になるので、補充ツモ（嶺上）で 11枚…ではなく、
+    // 実際の手牌は「暗槓面子を除いた手牌 + 嶺上ツモ」で 11枚（表示は手牌枠に13は維持されない）
+    // →UIを複雑にしないため、ここでは暗槓面子は「別管理」せず、手牌側から4枚除外した分はそのまま進めます。
+    // （役判定を厳密にやる場合、暗槓面子は副露面子として構造保持が必要。現段階のMVPでは未導入）
+
+    state.kanCount += 1;
+
+    // カンドラ表示を即公開（採用仕様） 
+    const idx = deadWallIndicesForKandora(state.kanCount);
+    const ind = state.deadWall[idx.ind];
+    const uraInd = state.deadWall[idx.ura];
+    if (!ind || !uraInd) return endHand("エラー：死に王牌不足（カン上限）");
+
+    state.doraIndicators.push(ind);
+    state.uraIndicators.push(uraInd);
+    state.doraTiles.push(MahHack.nextDoraFromIndicator(ind));
+
+    log(`暗槓: ${tile}（カンドラ表示牌追加: ${ind} / ドラ: ${MahHack.nextDoraFromIndicator(ind)}）`);
+
+    // 嶺上牌ツモ：deadWall末尾から1枚
+    const rinshanTile = state.deadWall.pop();
+    if (!rinshanTile) return endHand("流局：王牌不足");
+
+    // 手牌を再構築：remain のうち13枚を手牌側、残り1枚をツモ牌枠…という運用に揃える
+    // 現状の remain は 10枚。嶺上で1枚増えて11枚。
+    // MVPとして「暗槓後の面子固定」をUIに出さないため、ここは次段階で面子表示（暗槓枠）を導入するのが正道です。
+    // ただ今回の依頼はUI操作性（自動ツモ/別枠/理牌）なので、暗槓後の表示は“簡易”として続行します。
+
+    state.hand = MahHack.sortTiles(remain); // ここでは理牌してOK
+    state.drawn = rinshanTile;
+    state.lastDraw = rinshanTile;
+    state.lastWinFrom = "rinshan";
+
+    log(`嶺上ツモ: ${rinshanTile}`);
+    render();
   }
 
   function win() {
-    if (!state) return;
-    if (!state.hasDrawnThisTurn || !MahHack.isAgari(state.hand)) {
-      log("和了不可：和了形ではありません");
-      return;
-    }
+    if (!state || state.isEnded) return;
+    if (!state.drawn) return;
+    const tiles = [...state.hand, state.drawn];
+    if (!MahHack.isAgari(tiles)) { log("和了不可：和了形ではありません"); return; }
 
-    // win tile: lastDraw
-    const winTile = state.lastDraw;
+    const winTile = state.drawn;
     const winType = "tsumo";
 
-    // haitei flag: if last live draw consumed the last live tile
+    // 海底：live wallが0になったツモで和了（定義上の整理） 
     const haitei = (state.lastWinFrom === "live" && state.wall.length === 0);
     const rinshan = (state.lastWinFrom === "rinshan");
 
@@ -329,11 +386,11 @@
       riichi: state.riichi && !state.doubleRiichi,
       doubleRiichi: state.doubleRiichi,
       haitei,
-      houtei: false,   // ソロ仕様では発生しない
+      houtei: false,   // ソロ仕様では発生しない 
       rinshan,
-      chankan: false,  // ソロ仕様では発生しない
-      tenhou: false,   // 「配牌14枚（親）」で和了している場合のみ app側で付与する余地（今回は未導入）
-      chiihou: false,  // ソロ仕様（親固定）では未使用
+      chankan: false,  // ソロ仕様では発生しない 
+      tenhou: false,
+      chiihou: false,
       seatWind: state.seatWind,
       roundWind: state.roundWind,
       kanCount: state.kanCount,
@@ -344,7 +401,7 @@
       optMangan30fu4han: !!optMangan30fu4han.checked,
     };
 
-    const yakuInfo = MahHack.detectYaku(state.hand, ctx);
+    const yakuInfo = MahHack.detectYaku(tiles, ctx);
 
     log("=== 和了（ツモ） ===");
     log(`和了牌: ${winTile} / 取得元: ${state.lastWinFrom}`);
@@ -355,7 +412,7 @@
     log("役：");
     for (const y of yakuInfo.yaku) log(`- ${y.name}：${y.han}翻`);
 
-    const fu = MahHack.calcFu(state.hand, yakuInfo, ctx);
+    const fu = MahHack.calcFu(tiles, yakuInfo, ctx);
     const han = yakuInfo.han;
 
     log(`合計：${han}翻 / ${fu}符`);
@@ -369,7 +426,6 @@
   }
 
   btnNew.addEventListener("click", newGame);
-  btnDraw.addEventListener("click", drawFromLive);
   btnWin.addEventListener("click", win);
   btnRiichi.addEventListener("click", declareRiichi);
   btnAnkan.addEventListener("click", ankan);
