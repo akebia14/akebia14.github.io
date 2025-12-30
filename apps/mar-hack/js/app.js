@@ -237,6 +237,8 @@
   }
 
   function afterDiscardCommon(discardedTile) {
+    state.discards.push(discardedTile);
+
     // 捨て牌後に理牌
     state.hand = MahHack.sortTiles(state.hand);
     state.drawn = null;
