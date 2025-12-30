@@ -1,518 +1,151 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Mini Idle Hack&Slash (Phase 2++)</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 16px; line-height: 1.5; }
-    button { padding: 10px 12px; margin: 4px 6px 4px 0; }
-    .row { margin: 10px 0; }
-    .box { padding: 10px; border: 1px solid #ddd; border-radius: 8px; margin: 10px 0; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-    .enemyWrap { display: flex; gap: 12px; align-items: center; }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mini Idle Hack&Slash (Phase 3)</title>
 
-    /* 敵表示エリア */
-    .enemyArea {
-      position: relative;
-      width: 160px;
-      height: 160px;
-    }
-
-    #enemyImg {
-      width: 160px; height: 160px;
-      object-fit: contain;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      user-select: none;
-      -webkit-user-select: none;
-      cursor: pointer;
-      background: #fafafa;
-      display: block;
-    }
-
-    /* 撃破演出 */
-    #enemyImg.killShake {
-      animation: killShake 0.2s ease-in-out;
-    }
-    @keyframes killShake {
-      0%   { transform: translate(0, 0) rotate(0deg); }
-      25%  { transform: translate(-3px, 1px) rotate(-2deg); }
-      50%  { transform: translate(3px, -1px) rotate(2deg); }
-      75%  { transform: translate(-2px, -1px) rotate(-1deg); }
-      100% { transform: translate(0, 0) rotate(0deg); }
-    }
-
-    /* フラッシュ（敵エリアに重ねる） */
-    .flash {
-      position: absolute;
-      inset: 0;
-      border-radius: 8px;
-      pointer-events: none;
-      opacity: 0;
-      background: rgba(255,255,255,0.85);
-    }
-    .flash.on {
-      animation: flash 0.18s ease-out;
-    }
-    @keyframes flash {
-      0%   { opacity: 0; }
-      30%  { opacity: 1; }
-      100% { opacity: 0; }
-    }
-
-    /* ダメージフロート */
-    .floatDmg {
-      position: absolute;
-      pointer-events: none;
-      font-weight: 800;
-      font-size: 18px;
-      text-shadow: 0 1px 0 rgba(0,0,0,0.25);
-      will-change: transform, opacity;
-      animation: floatUp 0.5s ease-out forwards;
-    }
-    @keyframes floatUp {
-      0%   { transform: translateY(0); opacity: 1; }
-      100% { transform: translateY(-24px); opacity: 0; }
-    }
-
-    .hint { font-size: 12px; color: #666; }
-  </style>
+<style>
+body { font-family: system-ui, sans-serif; padding:16px; }
+button { padding:8px 12px; margin:4px 6px 4px 0; }
+.box { border:1px solid #ddd; border-radius:8px; padding:10px; margin:10px 0; }
+.mono { font-family: ui-monospace, monospace; }
+.enemyArea { position:relative; width:160px; height:160px; }
+#enemyImg { width:160px; height:160px; cursor:pointer; }
+.float { position:absolute; font-weight:700; animation: float 0.5s forwards; pointer-events:none; }
+@keyframes float { to { transform:translateY(-24px); opacity:0; } }
+.weapon-common { color:#333; }
+.weapon-rare { color:#1e6bff; font-weight:700; }
+</style>
 </head>
+
 <body>
-  <h1>Mini Idle Hack&Slash（Phase 2++）</h1>
+<h1>Mini Idle Hack&Slash（Phase 3）</h1>
 
-  <div class="row">
-    <button id="btnStart">周回開始</button>
-    <button id="btnStop">停止</button>
-    <button id="btnReset">リセット（セーブ含む）</button>
+<button id="start">周回開始</button>
+<button id="stop">停止</button>
+<button id="reset">リセット</button>
+
+<div class="box">
+  <div class="enemyArea" id="enemyArea">
+    <img id="enemyImg">
   </div>
-
-  <div class="box">
-    <div class="enemyWrap">
-      <div>
-        <div class="enemyArea" id="enemyArea">
-          <img id="enemyImg" alt="enemy" />
-          <div class="flash" id="flash"></div>
-        </div>
-        <div class="hint">敵画像をクリック：クリックダメージ</div>
-      </div>
-      <div>
-        <div>状態: <span id="status" class="mono">IDLE</span></div>
-        <div>敵HP: <span id="enemyHp" class="mono">-</span> / <span id="enemyHpMax" class="mono">-</span></div>
-        <div>自分DPS: <span id="dps" class="mono">-</span></div>
-        <div>クリックDMG: <span id="clickDmg" class="mono">-</span></div>
-        <div>所持Gold: <span id="gold" class="mono">-</span></div>
-        <div>周回数: <span id="runs" class="mono">-</span></div>
-      </div>
-    </div>
+  <div>
+    HP: <span id="hp"></span>/<span id="hpMax"></span><br>
+    DPS: <span id="dps"></span><br>
+    Gold: <span id="gold"></span>
   </div>
+</div>
 
-  <div class="box">
-    <div><strong>強化</strong></div>
+<div class="box">
+  <strong>装備中の武器</strong><br>
+  <span id="equipWeapon"></span>
+</div>
 
-    <div style="margin: 6px 0 2px;">
-      DPS Lv: <span id="dpsLevel" class="mono">-</span>
-    </div>
-    <button id="btnUpgradeDps">DPS強化 (<span id="dpsCost" class="mono">-</span> G)</button>
-
-    <div style="margin: 10px 0 2px;">
-      Click Lv: <span id="clickLevel" class="mono">-</span>
-    </div>
-    <button id="btnUpgradeClick">クリック強化 (<span id="clickCost" class="mono">-</span> G)</button>
-  </div>
-
-  <div class="box">
-    <div>ログ</div>
-    <pre id="log" class="mono" style="white-space:pre-wrap; margin:0;"></pre>
-  </div>
+<div class="box">
+  <strong>新しいドロップ</strong><br>
+  <span id="dropWeapon"></span><br>
+  <button id="equipBtn">装備する</button>
+  <button id="discardBtn">捨てる</button>
+</div>
 
 <script>
 (() => {
-  'use strict';
+'use strict';
 
-  /*********************
-   * 定数
-   *********************/
-  const SAVE_KEY = 'mini_hns_phase2pp_v1';
-  const TICK_MS = 100;
+const SAVE_KEY = 'mini_hns_phase3_v1';
+const IMG_DIR = './pic/enemy/';
+const IMG_COUNT = 16;
 
-  // DPS強化
-  const BASE_DPS = 5;
-  const DPS_PER_LEVEL = 2;
-  const DPS_UPGRADE_BASE_COST = 20;
-  const DPS_UPGRADE_COST_RATE = 1.5;
+let state = {
+  hpMax:50,
+  hp:50,
+  gold:0,
+  runs:0,
+  baseDps:5,
+  weapon:{ name:'素手', dps:0, rare:'common' },
+  drop:null,
+  inRun:false
+};
 
-  // クリック強化
-  const BASE_CLICK_DMG = 1;
-  const CLICK_DMG_PER_LEVEL = 1;
-  const CLICK_UPGRADE_BASE_COST = 15;
-  const CLICK_UPGRADE_COST_RATE = 1.6;
+const $ = id => document.getElementById(id);
 
-  // 敵
-  const BASE_ENEMY_HP = 50;
-  const ENEMY_HP_GROWTH_PER_RUN = 10;
-  const GOLD_REWARD_BASE = 10;
+function save(){ localStorage.setItem(SAVE_KEY, JSON.stringify(state)); }
+function load(){
+  const s = localStorage.getItem(SAVE_KEY);
+  if(s) state = JSON.parse(s);
+}
 
-  // 敵画像
-  const ENEMY_IMAGE_COUNT = 16;
-  const ENEMY_IMAGE_DIR = './pic/enemy/';
-  const ENEMY_IMAGE_PREFIX = 'enemy';
-  const ENEMY_IMAGE_EXT = '.png';
+function calcDps(){
+  return state.baseDps + state.weapon.dps;
+}
 
-  // ダメージフロート（高速連打向け）
-  const FLOAT_LIFETIME_MS = 500;         // CSSアニメと合わせる
-  const FLOAT_MARGIN_PX = 14;            // 端に寄りすぎない
-  const FLOAT_FONT_MIN = 16;
-  const FLOAT_FONT_MAX = 22;
-
-  // 撃破演出
-  const KILL_SHAKE_CLASS = 'killShake';
-  const FLASH_CLASS = 'on';
-
-  /*********************
-   * 状態
-   *********************/
-  let state = {
-    gold: 0,
-    runs: 0,
-
-    dpsLevel: 0,
-    dps: BASE_DPS,
-
-    clickLevel: 0,
-    clickDmg: BASE_CLICK_DMG,
-
-    enemyHpMax: BASE_ENEMY_HP,
-    enemyHp: BASE_ENEMY_HP,
-    enemyImageNo: 1, // 1..16
-
-    inRun: false,
+function rollWeapon(){
+  const isRare = Math.random() < 0.2;
+  const dps = isRare
+    ? 6 + Math.floor(Math.random()*10)
+    : 1 + Math.floor(Math.random()*5);
+  return {
+    name: isRare ? 'Rare Sword' : 'Common Sword',
+    dps,
+    rare: isRare ? 'rare' : 'common'
   };
+}
 
-  let timerId = null;
+function nextEnemy(){
+  state.hpMax = 50 + state.runs * 10;
+  state.hp = state.hpMax;
+  $('enemyImg').src =
+    IMG_DIR + 'enemy' + String(1+Math.floor(Math.random()*IMG_COUNT)).padStart(3,'0') + '.png';
+}
 
-  /*********************
-   * DOM
-   *********************/
-  const $ = (id) => document.getElementById(id);
+function kill(){
+  state.gold += 10;
+  state.runs++;
+  state.drop = rollWeapon();
+  nextEnemy();
+}
 
-  const elStatus = $('status');
-  const elEnemyHp = $('enemyHp');
-  const elEnemyHpMax = $('enemyHpMax');
-  const elDps = $('dps');
-  const elClickDmg = $('clickDmg');
-  const elGold = $('gold');
-  const elRuns = $('runs');
-
-  const elDpsLevel = $('dpsLevel');
-  const elDpsCost = $('dpsCost');
-  const elClickLevel = $('clickLevel');
-  const elClickCost = $('clickCost');
-
-  const elLog = $('log');
-  const elEnemyImg = $('enemyImg');
-  const elEnemyArea = $('enemyArea');
-  const elFlash = $('flash');
-
-  const btnStart = $('btnStart');
-  const btnStop = $('btnStop');
-  const btnReset = $('btnReset');
-  const btnUpgradeDps = $('btnUpgradeDps');
-  const btnUpgradeClick = $('btnUpgradeClick');
-
-  /*********************
-   * 計算
-   *********************/
-  function calcDps() {
-    return BASE_DPS + state.dpsLevel * DPS_PER_LEVEL;
-  }
-
-  function calcDpsUpgradeCost() {
-    return Math.floor(
-      DPS_UPGRADE_BASE_COST * Math.pow(DPS_UPGRADE_COST_RATE, state.dpsLevel)
-    );
-  }
-
-  function calcClickDmg() {
-    return BASE_CLICK_DMG + state.clickLevel * CLICK_DMG_PER_LEVEL;
-  }
-
-  function calcClickUpgradeCost() {
-    return Math.floor(
-      CLICK_UPGRADE_BASE_COST * Math.pow(CLICK_UPGRADE_COST_RATE, state.clickLevel)
-    );
-  }
-
-  function pad3(n) {
-    return String(n).padStart(3, '0');
-  }
-
-  function enemyImagePath(no) {
-    return `${ENEMY_IMAGE_DIR}${ENEMY_IMAGE_PREFIX}${pad3(no)}${ENEMY_IMAGE_EXT}`;
-  }
-
-  function rollEnemyImageNo() {
-    return 1 + Math.floor(Math.random() * ENEMY_IMAGE_COUNT);
-  }
-
-  /*********************
-   * ログ
-   *********************/
-  function log(line) {
-    const ts = new Date().toLocaleString();
-    elLog.textContent = `[${ts}] ${line}\n` + elLog.textContent;
-  }
-
-  /*********************
-   * セーブ/ロード
-   *********************/
-  function save() {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(state));
-  }
-
-  function load() {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return false;
-    try {
-      const parsed = JSON.parse(raw);
-
-      state.gold = Number(parsed.gold) || 0;
-      state.runs = Number(parsed.runs) || 0;
-
-      state.dpsLevel = Number(parsed.dpsLevel) || 0;
-      state.clickLevel = Number(parsed.clickLevel) || 0;
-
-      state.enemyHpMax = Number(parsed.enemyHpMax) || BASE_ENEMY_HP;
-      state.enemyHp = Number(parsed.enemyHp) || state.enemyHpMax;
-
-      const no = Number(parsed.enemyImageNo);
-      state.enemyImageNo = (no >= 1 && no <= ENEMY_IMAGE_COUNT) ? no : 1;
-
-      state.inRun = Boolean(parsed.inRun);
-
-      state.dps = calcDps();
-      state.clickDmg = calcClickDmg();
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function resetAll() {
-    stopRun();
-    localStorage.removeItem(SAVE_KEY);
-    state = {
-      gold: 0,
-      runs: 0,
-      dpsLevel: 0,
-      dps: BASE_DPS,
-      clickLevel: 0,
-      clickDmg: BASE_CLICK_DMG,
-      enemyHpMax: BASE_ENEMY_HP,
-      enemyHp: BASE_ENEMY_HP,
-      enemyImageNo: 1,
-      inRun: false,
-    };
-    render();
-    log('リセットしました。');
-  }
-
-  /*********************
-   * ダメージフロート（敵エリア内ランダム位置）
-   *********************/
-  function spawnDamageFloat(amount) {
-    // enemyArea の中に absolute で追加（0.5秒後に remove）
-    const w = elEnemyArea.clientWidth;
-    const h = elEnemyArea.clientHeight;
-
-    const x = FLOAT_MARGIN_PX + Math.random() * (w - FLOAT_MARGIN_PX * 2);
-    const y = FLOAT_MARGIN_PX + Math.random() * (h - FLOAT_MARGIN_PX * 2);
-
-    const font = Math.floor(FLOAT_FONT_MIN + Math.random() * (FLOAT_FONT_MAX - FLOAT_FONT_MIN));
-
-    const el = document.createElement('div');
-    el.className = 'floatDmg';
-    el.textContent = `-${amount}`;
-    el.style.left = `${x}px`;
-    el.style.top = `${y}px`;
-    el.style.fontSize = `${font}px`;
-
-    elEnemyArea.appendChild(el);
-
-    // 高速連打時も詰まらないように時間で掃除
-    setTimeout(() => el.remove(), FLOAT_LIFETIME_MS);
-  }
-
-  /*********************
-   * 撃破演出
-   *********************/
-  function playKillFx() {
-    // CSS animation は同一クラス連打だと発火しない場合があるので、クラスを付け直す
-    elEnemyImg.classList.remove(KILL_SHAKE_CLASS);
-    void elEnemyImg.offsetWidth; // reflow 強制
-    elEnemyImg.classList.add(KILL_SHAKE_CLASS);
-
-    elFlash.classList.remove(FLASH_CLASS);
-    void elFlash.offsetWidth;
-    elFlash.classList.add(FLASH_CLASS);
-  }
-
-  /*********************
-   * 敵の準備
-   *********************/
-  function prepareNextEnemy() {
-    state.enemyHpMax = BASE_ENEMY_HP + state.runs * ENEMY_HP_GROWTH_PER_RUN;
-    state.enemyHp = state.enemyHpMax;
-
-    state.enemyImageNo = rollEnemyImageNo();
-    elEnemyImg.src = enemyImagePath(state.enemyImageNo);
-  }
-
-  /*********************
-   * 進行
-   *********************/
-  function startRun() {
-    if (state.inRun) return;
-    state.inRun = true;
-    prepareNextEnemy();
-    log(`周回開始：敵HP=${state.enemyHpMax}, DPS=${state.dps}`);
-    timerId && clearInterval(timerId);
-    timerId = setInterval(tick, TICK_MS);
-    render();
-  }
-
-  function stopRun() {
-    state.inRun = false;
-    timerId && clearInterval(timerId);
-    timerId = null;
-    render();
-  }
-
-  function killEnemy() {
-    playKillFx();
-    state.runs += 1;
-    state.gold += GOLD_REWARD_BASE;
-    log(`撃破！ +${GOLD_REWARD_BASE}G（累計G=${state.gold} / 周回=${state.runs}）`);
-    prepareNextEnemy();
-  }
-
-  function tick() {
-    if (!state.inRun) return;
-
-    const damage = state.dps * (TICK_MS / 1000);
-    state.enemyHp = Math.max(0, state.enemyHp - damage);
-
-    if (state.enemyHp <= 0) {
-      killEnemy();
-    }
-
-    save();
-    render();
-  }
-
-  /*********************
-   * クリック攻撃
-   *********************/
-  function clickAttack() {
-    if (!state.inRun) return;
-
-    // クリックダメージ表示（先に出す：体感が良い）
-    spawnDamageFloat(state.clickDmg);
-
-    state.enemyHp = Math.max(0, state.enemyHp - state.clickDmg);
-    if (state.enemyHp <= 0) {
-      killEnemy();
-    }
-
-    save();
-    render();
-  }
-
-  /*********************
-   * 強化
-   *********************/
-  function upgradeDps() {
-    const cost = calcDpsUpgradeCost();
-    if (state.gold < cost) {
-      log('Goldが足りません（DPS強化）。');
-      return;
-    }
-    state.gold -= cost;
-    state.dpsLevel += 1;
-    state.dps = calcDps();
-    log(`DPS強化：Lv${state.dpsLevel}（DPS=${state.dps}）`);
-    save();
-    render();
-  }
-
-  function upgradeClick() {
-    const cost = calcClickUpgradeCost();
-    if (state.gold < cost) {
-      log('Goldが足りません（クリック強化）。');
-      return;
-    }
-    state.gold -= cost;
-    state.clickLevel += 1;
-    state.clickDmg = calcClickDmg();
-    log(`クリック強化：Lv${state.clickLevel}（ClickDMG=${state.clickDmg}）`);
-    save();
-    render();
-  }
-
-  /*********************
-   * 表示
-   *********************/
-  function render() {
-    elStatus.textContent = state.inRun ? 'RUNNING' : 'IDLE';
-    elEnemyHp.textContent = Math.ceil(state.enemyHp);
-    elEnemyHpMax.textContent = state.enemyHpMax;
-
-    elDps.textContent = state.dps;
-    elClickDmg.textContent = state.clickDmg;
-
-    elGold.textContent = state.gold;
-    elRuns.textContent = state.runs;
-
-    elDpsLevel.textContent = state.dpsLevel;
-    elDpsCost.textContent = calcDpsUpgradeCost();
-
-    elClickLevel.textContent = state.clickLevel;
-    elClickCost.textContent = calcClickUpgradeCost();
-  }
-
-  /*********************
-   * イベント
-   *********************/
-  btnStart.onclick = startRun;
-  btnStop.onclick = () => { log('停止しました。'); stopRun(); save(); };
-  btnReset.onclick = resetAll;
-
-  btnUpgradeDps.onclick = upgradeDps;
-  btnUpgradeClick.onclick = upgradeClick;
-
-  elEnemyImg.addEventListener('click', clickAttack);
-
-  elEnemyImg.addEventListener('error', () => {
-    log(`画像が読み込めません：${elEnemyImg.src}`);
-  });
-
-  /*********************
-   * 初期化
-   *********************/
-  const loaded = load();
-
-  // 初回表示用に画像をセット（ロードで番号があればそれを採用）
-  elEnemyImg.src = enemyImagePath(state.enemyImageNo);
-
+$('enemyImg').onclick = () => {
+  if(!state.inRun) return;
+  state.hp -= 1;
+  if(state.hp <= 0) kill();
   render();
-  log(loaded ? 'セーブデータをロードしました。' : '新規開始です。');
-
-  // ロード時に inRun=true でも自動再開はしない
-  state.inRun = false;
   save();
-  render();
+};
+
+$('start').onclick = () => { state.inRun=true; nextEnemy(); render(); };
+$('stop').onclick = () => { state.inRun=false; };
+$('reset').onclick = () => { localStorage.removeItem(SAVE_KEY); location.reload(); };
+
+$('equipBtn').onclick = () => {
+  if(!state.drop) return;
+  state.weapon = state.drop;
+  state.drop = null;
+  render(); save();
+};
+
+$('discardBtn').onclick = () => {
+  state.drop = null;
+  render(); save();
+};
+
+function render(){
+  $('hp').textContent = Math.ceil(state.hp);
+  $('hpMax').textContent = state.hpMax;
+  $('gold').textContent = state.gold;
+  $('dps').textContent = calcDps();
+
+  $('equipWeapon').innerHTML =
+    `<span class="weapon-${state.weapon.rare}">${state.weapon.name} (+${state.weapon.dps})</span>`;
+
+  $('dropWeapon').innerHTML = state.drop
+    ? `<span class="weapon-${state.drop.rare}">${state.drop.name} (+${state.drop.dps})</span>`
+    : '---';
+}
+
+load();
+render();
 })();
 </script>
 </body>
