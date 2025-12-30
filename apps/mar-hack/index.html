@@ -10,7 +10,7 @@
   <header class="bar">
     <div class="title">Mah Hack（ソロ麻雀MVP）</div>
     <div class="meta">
-      <span id="drawCount">ツモ 0 / 50（残り 50）</span>
+      <span id="drawCount">ツモ 0 / 30（残り 30）</span>
       <span id="wallCount">山 0</span>
     </div>
   </header>
@@ -18,11 +18,10 @@
   <main class="wrap">
     <section class="panel">
       <div class="row">
-      <button id="btnNew">新規開始</button>
-      <button id="btnRiichi" disabled>リーチ</button>
-      <button id="btnAnkan" disabled>暗槓</button>
-      <button id="btnWin" disabled>上がる（ツモ）</button>
-
+        <button id="btnNew">新規開始</button>
+        <button id="btnRiichi" disabled>リーチ</button>
+        <button id="btnAnkan" disabled>暗槓</button>
+        <button id="btnWin" disabled>上がる（ツモ）</button>
       </div>
 
       <div class="row small">
@@ -32,45 +31,38 @@
         </label>
       </div>
 
+      <!-- ★ドラは「ドラ牌のみ」、裏ドラも「裏ドラ牌のみ」。表示牌は出さない -->
       <div class="row">
-        <div class="box">
-          <div class="boxTitle">ドラ表示牌</div>
-          <div id="doraIndicator" class="tiles"></div>
-        </div>
         <div class="box">
           <div class="boxTitle">ドラ</div>
           <div id="doraTile" class="tiles"></div>
         </div>
-      </div>
-
-      <div class="box">
-        <div class="boxTitle">裏ドラ表示牌</div>
-        <div id="uraDoraIndicator" class="tiles"></div>
-      </div>
-      <div class="box">
-        <div class="boxTitle">裏ドラ</div>
-        <div id="uraDoraTile" class="tiles"></div>
-      </div>
-
-
-      <div class="box">
-      <div class="boxTitle">手牌（クリックで捨て牌）</div>
-    
-      <div class="handRow">
-        <div id="hand" class="tiles hand"></div>
-        <div class="drawnCol">
-          <div id="drawn" class="tiles drawn"></div>
+        <div class="box">
+          <div class="boxTitle">裏ドラ</div>
+          <div id="uraDoraTile" class="tiles"></div>
         </div>
       </div>
-    
-      <div class="hint">※ ツモ牌は右に表示。捨て牌後に理牌して次の自動ツモに進みます。</div>
+
+      <div class="box">
+        <div class="boxTitle">手牌（クリックで捨て牌）</div>
+
+        <div class="handRow">
+          <div id="hand" class="tiles hand"></div>
+
+          <div class="drawnCol">
+            <div class="drawnLabel">ツモ</div>
+            <div id="drawn" class="tiles drawn"></div>
+          </div>
+        </div>
+
+        <div class="hint">※ ツモ牌は右に表示。捨て牌後に理牌して次の自動ツモに進みます。</div>
       </div>
-      
+
       <div class="box">
         <div class="boxTitle">捨て牌</div>
         <div id="discards" class="tiles"></div>
       </div>
-      
+
       <div class="box">
         <div class="boxTitle">ログ</div>
         <pre id="log" class="log"></pre>
