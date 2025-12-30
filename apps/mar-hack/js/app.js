@@ -148,7 +148,9 @@
 
     renderTiles(elDiscards, state.discards);
 
-    elDrawCount.textContent = `ツモ ${state.draws} / ${GAME_MAX_DRAWS}`;
+    const remaining = Math.max(0, GAME_MAX_DRAWS - state.draws);
+    elDrawCount.textContent = `ツモ ${state.draws} / ${GAME_MAX_DRAWS}（残り ${remaining}）`;
+
     elWallCount.textContent = `山 ${state.wall.length}`;
 
     // 和了は14枚揃っている時のみ
