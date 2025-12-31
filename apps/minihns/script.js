@@ -2,23 +2,30 @@
   'use strict';
 
   /******************************************************************
-   * Phase 3.1〜4 Integrated Game Logic (script.js)
-   * FIX: Inventory buttons require multiple clicks
-   * - Cause: tick(100ms) called render() which rebuilt inventory DOM via innerHTML
-   * - Fix: Split rendering into renderFast (every tick) and renderSlow (only on changes)
+   * Phase 5 + Phase 6 Integrated Game Logic (script.js)
+   * - Phase5: Scaling unified by kills (enemy HP, gold, weapon DPS)
+   * - Phase6: Rarity 5 tiers (Common/Uncommon/Rare/Epic/Legendary)
+   * - Boss rarity: Common = 0, redistributed to others (fixed weights)
+   * - Keeps: auto DPS tick, click dmg, inventory(5), equip(1), float dmg,
+   *          boss every 10, kill fx, save/load, renderFast/renderSlow split
+   *
+   * NOTE:
+   * - Critical applies to CLICK only (avoid tick spam).
    ******************************************************************/
 
   /*********************
    * Constants
    *********************/
-  const SAVE_KEY = 'mini_hns_phase4_integrated_v1';
+  const SAVE_KEY = 'mini_hns_phase5_6_v1';
 
   const TICK_MS = 100;
 
-  // Base progression
+  // Progression base (Phase5 scaling)
   const BASE_ENEMY_HP = 50;
   const ENEMY_HP_GROWTH_PER_KILL = 10;
+
   const BASE_GOLD_REWARD = 10;
+  const GOLD_GROWTH_PER_KILL = 1; // kills で線形増加（固定）
 
   // Upgrades
   const BASE_DPS = 5;
@@ -47,15 +54,8 @@
   const KILL_SHAKE_CLASS = 'killShake';
   const FLASH_CLASS = 'on';
 
-  // Inventory / weapons
+  // Inventory
   const INVENTORY_SIZE = 5;
-
-  const WEAPON_DROP_RATE_RARE = 0.20;       // normal
-  const WEAPON_DROP_RATE_RARE_BOSS = 0.50;  // boss
-  const WEAPON_COMMON_MIN = 1;
-  const WEAPON_COMMON_MAX = 5;
-  const WEAPON_RARE_MIN = 6;
-  const WEAPON_RARE_MAX = 15;
 
   // Boss
   const BOSS_EVERY = 10;
@@ -66,34 +66,94 @@
   const CRIT_CHANCE = 0.05;
   const CRIT_MULT = 2.0;
 
-  // Weapon name generation
-  const PREFIX_COMMON = ['Rusty', 'Plain', 'Worn', 'Simple', 'Old'];
-  const PREFIX_RARE = ['Sharp', 'Brutal', 'Arcane', 'Gleaming', 'Vicious', 'Mythic'];
+  // Phase6: Rarity definition
+  const RARITIES = /** @type {const} */ ([
+    'common',
+    'uncommon',
+    'rare',
+    'epic',
+    'legendary'
+  ]);
 
+  const RARITY_LABEL = {
+    common: 'Common',
+    uncommon: 'Uncommon',
+    rare: 'Rare',
+    epic: 'Epic',
+    legendary: 'Legendary',
+  };
+
+  // Normal drop distribution (sum 100)
+  const DROP_WEIGHTS_NORMAL = {
+    common: 60,
+    uncommon: 25,
+    rare: 10,
+    epic: 4,
+    legendary: 1,
+  };
+
+  // Boss drop distribution (sum 100)
+  // User request: Common = 0, redistribute to others
+  const DROP_WEIGHTS_BOSS = {
+    common: 0,
+    uncommon: 43,
+    rare: 29,
+    epic: 21,
+    legendary: 7,
+  };
+
+  // Phase5+6: Weapon DPS scaling
+  // base grows with kills; rarity adds multiplier
+  const WEAPON_DPS_BASE_MIN = 1;
+  const WEAPON_DPS_BASE_MAX = 3;
+  const WEAPON_DPS_GROWTH_PER_KILL = 0.35; // killsで基礎レンジが伸びる（固定）
+
+  const RARITY_DPS_MULT = {
+    common: 1.0,
+    uncommon: 1.25,
+    rare: 1.6,
+    epic: 2.1,
+    legendary: 2.8,
+  };
+
+  // Weapon name generation (Phase6)
   const TYPES = ['Sword', 'Axe', 'Dagger', 'Mace', 'Spear'];
 
-  const SUFFIX_COMMON = ['of Training', 'of Habit', 'of Practice', 'of Steady Hands'];
-  const SUFFIX_RARE = ['of Power', 'of Fury', 'of Slaughter', 'of Precision', 'of Kings'];
+  const PREFIX_BY_RARITY = {
+    common: ['Rusty', 'Plain', 'Worn', 'Simple', 'Old'],
+    uncommon: ['Sturdy', 'Balanced', 'Honed', 'Reliable', 'Tough'],
+    rare: ['Sharp', 'Brutal', 'Arcane', 'Gleaming', 'Vicious', 'Mythic'],
+    epic: ['Eternal', 'Doom', 'Celestial', 'Abyssal', 'Radiant'],
+    legendary: ['Godslayer', 'Worldbreaker', 'Phoenix', 'Dragon', 'Legend'],
+  };
+
+  const SUFFIX_BY_RARITY = {
+    common: ['of Training', 'of Habit', 'of Practice', 'of Steady Hands'],
+    uncommon: ['of Craft', 'of Readiness', 'of Momentum', 'of Focus'],
+    rare: ['of Power', 'of Fury', 'of Slaughter', 'of Precision', 'of Kings'],
+    epic: ['of Cataclysm', 'of the Void', 'of Ascension', 'of the Titans'],
+    legendary: ['of Infinity', 'of Apocalypse', 'of the Ancients', 'of Destiny'],
+  };
 
   /*********************
    * State
    *********************/
   /** Weapon shape:
-   * { id: string, name: string, rarity: 'common'|'rare', dps: number }
+   * { id: string, name: string, rarity: 'common'|'uncommon'|'rare'|'epic'|'legendary', dps: number }
    */
   let state = {
     gold: 0,
-    kills: 0,           // total enemies defeated
+    kills: 0,
     dpsLevel: 0,
     clickLevel: 0,
 
     enemyHpMax: BASE_ENEMY_HP,
     enemyHp: BASE_ENEMY_HP,
     enemyImageNo: 1,
-    isBoss: false,      // current enemy is boss?
+    isBoss: false,
 
     equippedWeapon: { id: 'weapon_fist', name: '素手', rarity: 'common', dps: 0 },
-    inventory: [],      // up to INVENTORY_SIZE
+    inventory: [],
     droppedWeapon: null,
 
     inRun: false,
@@ -101,7 +161,7 @@
 
   let timerId = null;
 
-  // ★ FIX: heavy UI rebuild only when changed
+  // Heavy UI rebuild only when changed
   let needsSlowRender = true;
 
   /*********************
@@ -109,44 +169,36 @@
    *********************/
   const $ = (id) => document.getElementById(id);
 
-  // Status box
   const elStatus = $('status');
   const elEnemyHp = $('enemyHp');
   const elEnemyHpMax = $('enemyHpMax');
   const elGold = $('gold');
-  const elKills = $('runs'); // UI label "runs" = kills
+  const elKills = $('runs');
 
-  // DPS breakdown
   const elTotalDps = $('totalDps');
   const elBaseDps = $('baseDps');
   const elLvDps = $('lvDps');
   const elWeaponDps = $('weaponDps');
 
-  // Click
   const elClickDmg = $('clickDmg');
 
-  // Upgrades
   const elDpsLevel = $('dpsLevel');
   const elDpsCost = $('dpsCost');
   const elClickLevel = $('clickLevel');
   const elClickCost = $('clickCost');
 
-  // Enemy image area
   const elEnemyArea = $('enemyArea');
   const elEnemyImg = $('enemyImg');
   const elFlash = $('flash');
 
-  // Equipment / drop / inventory
   const elEquippedWeapon = $('equippedWeapon');
   const elDroppedWeapon = $('droppedWeapon');
   const elDropActions = $('dropActions');
   const elReplaceActions = $('replaceActions');
   const elInventoryList = $('inventoryList');
 
-  // Log
   const elLog = $('log');
 
-  // Buttons
   const btnStart = $('btnStart');
   const btnStop = $('btnStop');
   const btnReset = $('btnReset');
@@ -198,6 +250,10 @@
       .replaceAll("'", '&#39;');
   }
 
+  function clamp(n, min, max) {
+    return Math.max(min, Math.min(max, n));
+  }
+
   /*********************
    * Calculations
    *********************/
@@ -222,7 +278,7 @@
   }
 
   function currentEnemyNumber() {
-    return state.kills + 1; // 1-indexed
+    return state.kills + 1;
   }
 
   function isBossForEnemyNumber(n) {
@@ -230,32 +286,68 @@
   }
 
   /*********************
-   * Weapon generation
+   * Phase5: Scaling (unified by kills)
    *********************/
-  function rollWeapon(isBossDrop) {
-    const rareRate = isBossDrop ? WEAPON_DROP_RATE_RARE_BOSS : WEAPON_DROP_RATE_RARE;
-    const isRare = Math.random() < rareRate;
+  function hpBaseByKills(kills) {
+    return BASE_ENEMY_HP + kills * ENEMY_HP_GROWTH_PER_KILL;
+  }
 
-    const dps = isRare
-      ? randInt(WEAPON_RARE_MIN, WEAPON_RARE_MAX)
-      : randInt(WEAPON_COMMON_MIN, WEAPON_COMMON_MAX);
+  function goldBaseByKills(kills) {
+    return BASE_GOLD_REWARD + kills * GOLD_GROWTH_PER_KILL;
+  }
 
-    const prefix = isRare
-      ? PREFIX_RARE[randInt(0, PREFIX_RARE.length - 1)]
-      : PREFIX_COMMON[randInt(0, PREFIX_COMMON.length - 1)];
+  function weaponBaseRangeByKills(kills) {
+    // Base range grows gradually with kills
+    const add = kills * WEAPON_DPS_GROWTH_PER_KILL;
+    const min = WEAPON_DPS_BASE_MIN + Math.floor(add);
+    const max = WEAPON_DPS_BASE_MAX + Math.floor(add * 1.2);
+    return { min, max: Math.max(min, max) };
+  }
 
+  /*********************
+   * Phase6: Rarity roll
+   *********************/
+  function rollRarity(isBossDrop) {
+    const weights = isBossDrop ? DROP_WEIGHTS_BOSS : DROP_WEIGHTS_NORMAL;
+
+    const total = RARITIES.reduce((sum, r) => sum + (weights[r] || 0), 0);
+    // total should be 100 by design, but calculate anyway.
+    let roll = Math.random() * total;
+
+    for (const r of RARITIES) {
+      roll -= (weights[r] || 0);
+      if (roll < 0) return r;
+    }
+    return 'common';
+  }
+
+  function rollWeaponName(rarity) {
+    const prefixArr = PREFIX_BY_RARITY[rarity] || PREFIX_BY_RARITY.common;
+    const suffixArr = SUFFIX_BY_RARITY[rarity] || SUFFIX_BY_RARITY.common;
+
+    const prefix = prefixArr[randInt(0, prefixArr.length - 1)];
     const type = TYPES[randInt(0, TYPES.length - 1)];
+    const suffix = suffixArr[randInt(0, suffixArr.length - 1)];
 
-    const suffix = isRare
-      ? SUFFIX_RARE[randInt(0, SUFFIX_RARE.length - 1)]
-      : SUFFIX_COMMON[randInt(0, SUFFIX_COMMON.length - 1)];
+    return `${prefix} ${type} ${suffix}`;
+  }
 
-    const name = `${prefix} ${type} ${suffix}`;
+  function rollWeapon(isBossDrop) {
+    const rarity = rollRarity(isBossDrop);
+
+    const baseRange = weaponBaseRangeByKills(state.kills);
+    const mult = RARITY_DPS_MULT[rarity] || 1.0;
+
+    // Apply multiplier to base range
+    const min = Math.max(1, Math.floor(baseRange.min * mult));
+    const max = Math.max(min, Math.floor(baseRange.max * mult));
+
+    const dps = randInt(min, max);
 
     return {
       id: makeId('weapon'),
-      name,
-      rarity: isRare ? 'rare' : 'common',
+      name: rollWeaponName(rarity),
+      rarity,
       dps,
     };
   }
@@ -263,6 +355,26 @@
   /*********************
    * Save / Load
    *********************/
+  function normalizeRarity(r) {
+    // backward compatibility: old version used 'rare' vs 'common'
+    if (r === 'rare') return 'rare';
+    if (r === 'common') return 'common';
+    if (r === 'uncommon') return 'uncommon';
+    if (r === 'epic') return 'epic';
+    if (r === 'legendary') return 'legendary';
+    return 'common';
+  }
+
+  function normalizeWeapon(w) {
+    if (!w || typeof w !== 'object') return null;
+    return {
+      id: String(w.id || makeId('weapon')),
+      name: String(w.name || 'Unknown Weapon'),
+      rarity: normalizeRarity(w.rarity),
+      dps: Number(w.dps) || 0
+    };
+  }
+
   function save() {
     localStorage.setItem(SAVE_KEY, JSON.stringify(state));
   }
@@ -287,39 +399,14 @@
 
       state.isBoss = Boolean(parsed.isBoss);
 
-      // equipped weapon
-      if (parsed.equippedWeapon && typeof parsed.equippedWeapon === 'object') {
-        const w = parsed.equippedWeapon;
-        state.equippedWeapon = {
-          id: String(w.id || 'weapon_fist'),
-          name: String(w.name || '素手'),
-          rarity: (w.rarity === 'rare') ? 'rare' : 'common',
-          dps: Number(w.dps) || 0
-        };
-      }
+      const eq = normalizeWeapon(parsed.equippedWeapon);
+      state.equippedWeapon = eq || { id: 'weapon_fist', name: '素手', rarity: 'common', dps: 0 };
 
-      // inventory
       state.inventory = Array.isArray(parsed.inventory)
-        ? parsed.inventory.slice(0, INVENTORY_SIZE).map((w) => ({
-            id: String(w?.id || makeId('weapon')),
-            name: String(w?.name || 'Unknown Weapon'),
-            rarity: (w?.rarity === 'rare') ? 'rare' : 'common',
-            dps: Number(w?.dps) || 0
-          }))
+        ? parsed.inventory.slice(0, INVENTORY_SIZE).map(normalizeWeapon).filter(Boolean)
         : [];
 
-      // drop
-      if (parsed.droppedWeapon && typeof parsed.droppedWeapon === 'object') {
-        const w = parsed.droppedWeapon;
-        state.droppedWeapon = {
-          id: String(w.id || makeId('weapon')),
-          name: String(w.name || 'Unknown Weapon'),
-          rarity: (w.rarity === 'rare') ? 'rare' : 'common',
-          dps: Number(w.dps) || 0
-        };
-      } else {
-        state.droppedWeapon = null;
-      }
+      state.droppedWeapon = normalizeWeapon(parsed.droppedWeapon);
 
       state.inRun = Boolean(parsed.inRun);
 
@@ -409,7 +496,7 @@
     const boss = isBossForEnemyNumber(n);
     state.isBoss = boss;
 
-    const base = BASE_ENEMY_HP + state.kills * ENEMY_HP_GROWTH_PER_KILL;
+    const base = hpBaseByKills(state.kills);
     state.enemyHpMax = boss ? base * BOSS_HP_MULT : base;
     state.enemyHp = state.enemyHpMax;
 
@@ -418,7 +505,8 @@
   }
 
   function rewardGold() {
-    const gold = state.isBoss ? (BASE_GOLD_REWARD * BOSS_GOLD_MULT) : BASE_GOLD_REWARD;
+    const base = goldBaseByKills(state.kills);
+    const gold = state.isBoss ? base * BOSS_GOLD_MULT : base;
     state.gold += gold;
     return gold;
   }
@@ -446,7 +534,7 @@
     if (!w) return;
     state.equippedWeapon = w;
     needsSlowRender = true;
-    log(`装備変更：${w.name}（+${w.dps} DPS）/ 総DPS=${calcTotalDps()}`);
+    log(`装備変更：${w.name}（${RARITY_LABEL[w.rarity]} / +${w.dps} DPS）/ 総DPS=${calcTotalDps()}`);
   }
 
   function equipDropWeapon() {
@@ -454,12 +542,12 @@
     state.equippedWeapon = state.droppedWeapon;
     state.droppedWeapon = null;
     needsSlowRender = true;
-    log(`装備変更：${state.equippedWeapon.name}（+${state.equippedWeapon.dps} DPS）/ 総DPS=${calcTotalDps()}`);
+    log(`装備変更：${state.equippedWeapon.name}（${RARITY_LABEL[state.equippedWeapon.rarity]} / +${state.equippedWeapon.dps} DPS）/ 総DPS=${calcTotalDps()}`);
   }
 
   function discardDropWeapon() {
     if (!state.droppedWeapon) return;
-    log(`武器破棄：${state.droppedWeapon.name}（+${state.droppedWeapon.dps} DPS）`);
+    log(`武器破棄：${state.droppedWeapon.name}（${RARITY_LABEL[state.droppedWeapon.rarity]} / +${state.droppedWeapon.dps} DPS）`);
     state.droppedWeapon = null;
     needsSlowRender = true;
   }
@@ -468,7 +556,7 @@
     if (!state.droppedWeapon) return;
 
     if (addToInventory(state.droppedWeapon)) {
-      log(`インベントリに追加：${state.droppedWeapon.name}（+${state.droppedWeapon.dps} DPS）`);
+      log(`インベントリに追加：${state.droppedWeapon.name}（${RARITY_LABEL[state.droppedWeapon.rarity]} / +${state.droppedWeapon.dps} DPS）`);
       state.droppedWeapon = null;
       needsSlowRender = true;
     } else {
@@ -484,15 +572,14 @@
     if (idx < state.inventory.length) {
       const removed = state.inventory[idx];
       state.inventory[idx] = state.droppedWeapon;
-      log(`置換：${removed.name} → ${state.droppedWeapon.name}`);
+      log(`置換：${removed.name}（${RARITY_LABEL[removed.rarity]}） → ${state.inventory[idx].name}（${RARITY_LABEL[state.inventory[idx].rarity]}）`);
       state.droppedWeapon = null;
       needsSlowRender = true;
       return;
     }
 
-    // idx points to empty slot
     if (addToInventory(state.droppedWeapon)) {
-      log(`インベントリに追加：${state.droppedWeapon.name}`);
+      log(`インベントリに追加：${state.droppedWeapon.name}（${RARITY_LABEL[state.droppedWeapon.rarity]}）`);
       state.droppedWeapon = null;
       needsSlowRender = true;
     } else {
@@ -510,21 +597,18 @@
     state.kills += 1;
     const gold = rewardGold();
 
-    // 100% drop
     const drop = rollWeapon(state.isBoss);
     state.droppedWeapon = drop;
 
-    // auto-add if space
     if (!isInventoryFull()) {
       addToInventory(drop);
       state.droppedWeapon = null;
-      log(`撃破！ +${gold}G / 武器取得：${drop.name}（+${drop.dps} DPS）`);
+      log(`撃破！ +${gold}G / 武器取得：${drop.name}（${RARITY_LABEL[drop.rarity]} / +${drop.dps} DPS）`);
     } else {
-      log(`撃破！ +${gold}G / 武器ドロップ：${drop.name}（+${drop.dps} DPS）→ 置換 or 破棄`);
+      log(`撃破！ +${gold}G / 武器ドロップ：${drop.name}（${RARITY_LABEL[drop.rarity]} / +${drop.dps} DPS）→ 置換 or 破棄`);
     }
 
     needsSlowRender = true;
-
     prepareNextEnemy();
   }
 
@@ -633,21 +717,27 @@
   /*********************
    * Rendering
    *********************/
-  function weaponLabel(w) {
-    if (!w) return '---';
-    const cls = (w.rarity === 'rare') ? 'rare-rare' : 'rare-common';
-    const rareName = (w.rarity === 'rare') ? 'Rare' : 'Common';
-    return `<span class="${cls}">${rareName}：${escapeHtml(w.name)}（+${w.dps} DPS）</span>`;
+  function rarityCssClass(rarity) {
+    // 既存CSS（rare-common / rare-rare）がある前提でも崩れないようにフォールバックします
+    // さらに区別したい場合は index.html のCSSに .rarity-* を追加してください
+    if (rarity === 'common' || rarity === 'uncommon') return 'rare-common';
+    if (rarity === 'rare' || rarity === 'epic' || rarity === 'legendary') return 'rare-rare';
+    return 'rare-common';
   }
 
-  // ★ Fast: update only numeric/status text (safe every tick)
+  function weaponLabel(w) {
+    if (!w) return '---';
+    const cls = rarityCssClass(w.rarity);
+    const label = RARITY_LABEL[w.rarity] || 'Common';
+    return `<span class="${cls}">${label}：${escapeHtml(w.name)}（+${w.dps} DPS）</span>`;
+  }
+
+  // Fast: update numeric/status only
   function renderFast() {
     const n = currentEnemyNumber();
-    if (state.inRun) {
-      elStatus.textContent = `RUNNING (#${n}${state.isBoss ? ' BOSS' : ''})`;
-    } else {
-      elStatus.textContent = 'IDLE';
-    }
+    elStatus.textContent = state.inRun
+      ? `RUNNING (#${n}${state.isBoss ? ' BOSS' : ''})`
+      : 'IDLE';
 
     elEnemyHp.textContent = Math.ceil(state.enemyHp);
     elEnemyHpMax.textContent = state.enemyHpMax;
@@ -670,7 +760,6 @@
     elClickCost.textContent = calcClickUpgradeCost();
   }
 
-  // ★ Slow: rebuild inventory/drop DOM only when changed
   function renderInventory() {
     let html = '';
     for (let i = 0; i < INVENTORY_SIZE; i++) {
@@ -769,7 +858,6 @@
       if (needsSlowRender) { renderSlow(); needsSlowRender = false; }
     };
 
-    // Replace actions (delegation)
     elReplaceActions.addEventListener('click', (e) => {
       const t = e.target;
       if (!(t instanceof HTMLElement)) return;
@@ -784,7 +872,6 @@
       if (needsSlowRender) { renderSlow(); needsSlowRender = false; }
     });
 
-    // Inventory list actions (delegation)
     elInventoryList.addEventListener('click', (e) => {
       const t = e.target;
       if (!(t instanceof HTMLElement)) return;
@@ -805,7 +892,7 @@
 
       if (act === 'discardInv') {
         const removed = removeFromInventoryByIndex(idx);
-        if (removed) log(`武器破棄：${removed.name}（+${removed.dps} DPS）`);
+        if (removed) log(`武器破棄：${removed.name}（${RARITY_LABEL[removed.rarity]} / +${removed.dps} DPS）`);
         needsSlowRender = true;
         save();
         renderFast();
@@ -821,20 +908,20 @@
   function init() {
     const loaded = load();
 
-    // set initial image
-    elEnemyImg.src = enemyImagePath(state.enemyImageNo);
-
     // do not auto-resume
     state.inRun = false;
-    save();
 
-    // first render: both
+    // ensure enemy image is set
+    elEnemyImg.src = enemyImagePath(clamp(state.enemyImageNo, 1, ENEMY_IMAGE_COUNT));
+
+    // First render
     renderFast();
     renderSlow();
     needsSlowRender = false;
 
     log(loaded ? 'セーブデータをロードしました。' : '新規開始です。');
 
+    save();
     bindEvents();
   }
 
