@@ -235,6 +235,10 @@
   const elWeaponDps = $('weaponDps');
 
   const elClickDmg = $('clickDmg');
+  const elCritChance = $('critChance');
+  const elCritMult = $('critMult');
+  const elGoldMult = $('goldMult');
+
 
   const elDpsLevel = $('dpsLevel');
   const elDpsCost = $('dpsCost');
@@ -926,6 +930,12 @@
 
     // ClickDMG表示は「基礎 + 武器DPC」
     elClickDmg.textContent = calcClickDmgTotal();
+
+    // Current weapon-applied stats
+    elCritChance.textContent = `${Math.round(calcCritChance() * 100)}%`;
+    elCritMult.textContent = calcCritMult().toFixed(2);
+    elGoldMult.textContent = `x${calcGoldMult().toFixed(2)}`;
+
 
     elDpsLevel.textContent = state.dpsLevel;
     elDpsCost.textContent = calcDpsUpgradeCost();
