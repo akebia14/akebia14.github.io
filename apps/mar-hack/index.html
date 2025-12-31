@@ -17,6 +17,27 @@
 
   <main class="wrap">
     <section class="panel">
+      <!-- ★Battle HUD -->
+      <div class="row">
+        <div class="box hud">
+          <div class="boxTitle">バトル</div>
+          <div class="hudRow">
+            <div class="hudItem">
+              <div class="hudLabel">STAGE</div>
+              <div id="stage" class="hudValue">-</div>
+            </div>
+            <div class="hudItem">
+              <div class="hudLabel">自分HP</div>
+              <div id="playerHp" class="hudValue">-</div>
+            </div>
+            <div class="hudItem">
+              <div class="hudLabel">敵HP</div>
+              <div id="enemyHp" class="hudValue">-</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="row">
         <button id="btnNew">新規開始</button>
         <button id="btnRiichi" disabled>リーチ</button>
@@ -31,7 +52,6 @@
         </label>
       </div>
 
-      <!-- ★ドラは「ドラ牌のみ」、裏ドラも「裏ドラ牌のみ」。表示牌は出さない -->
       <div class="row">
         <div class="box">
           <div class="boxTitle">ドラ</div>
@@ -50,6 +70,7 @@
           <div id="hand" class="tiles hand"></div>
 
           <div class="drawnCol">
+            <div class="drawnLabel">ツモ</div>
             <div id="drawn" class="tiles drawn"></div>
           </div>
         </div>
@@ -70,6 +91,7 @@
   </main>
 
   <script src="./js/mahjong.js"></script>
+  <script src="./js/battle.js"></script>
   <script src="./js/app.js"></script>
 </body>
 </html>
