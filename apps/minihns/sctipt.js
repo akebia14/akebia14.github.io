@@ -1,4 +1,3 @@
-<script>
 (() => {
   'use strict';
 
@@ -800,4 +799,4 @@
     init();
   }
 })();
-</script>
+
