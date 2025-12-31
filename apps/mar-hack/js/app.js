@@ -1,5 +1,5 @@
 (() => {
-  const GAME_MAX_DRAWS = 50;
+  const GAME_MAX_DRAWS = 30;
   const AUTO_DRAW_DELAY_MS = 200;
 
   const $ = (id) => document.getElementById(id);
@@ -15,8 +15,9 @@
   const elStage = $("stage");
   const elPlayerHp = $("playerHp");
   const elEnemyHp = $("enemyHp");
+  const elEnemyAtk = $("enemyAtk");
 
-  // Dora (tile only)
+  // Dora
   const elDora = $("doraTile");
   const elUraDora = $("uraDoraTile");
 
@@ -26,7 +27,20 @@
   const btnAnkan = $("btnAnkan");
   const optMangan30fu4han = $("optMangan30fu4han");
 
+  // Result dialog
+  const dlg = $("resultDialog");
+  const elResultTitle = $("resultTitle");
+  const elResultSub = $("resultSub");
+  const elResultHand = $("resultHand");
+  const elResultDora = $("resultDora");
+  const elResultUraDora = $("resultUraDora");
+  const elResultYaku = $("resultYaku");
+  const elResultScore = $("resultScore");
+  const elResultBattle = $("resultBattle");
+  const btnNextHand = $("btnNextHand");
+
   let state = null;
+  let pendingNextHand = false;
 
   function log(s) {
     elLog.textContent = (elLog.textContent ? elLog.textContent + "\n" : "") + s;
@@ -98,11 +112,13 @@
       elStage.textContent = "-";
       elPlayerHp.textContent = "-";
       elEnemyHp.textContent = "-";
+      elEnemyAtk.textContent = "-";
       return;
     }
     elStage.textContent = String(b.stage);
     elPlayerHp.textContent = String(b.playerHp);
     elEnemyHp.textContent = String(b.enemyHp);
+    elEnemyAtk.textContent = String(b.enemyAtk);
   }
 
   function scheduleAutoDraw() {
@@ -138,23 +154,31 @@
     return false;
   }
 
+  function setControlsEnabled(enabled) {
+    btnWin.disabled = true;
+    btnRiichi.disabled = true;
+    btnAnkan.disabled = true;
+    if (!enabled) return;
+    const canWin = !!state?.drawn && MahHack.isAgari([...state.hand, state.drawn]);
+    btnWin.disabled = !canWin;
+    btnRiichi.disabled = !canRiichiNow();
+    btnAnkan.disabled = state.riichiLocked || !hasAnkanCandidate();
+  }
+
   function render() {
     if (!state) return;
 
     renderBattleHud();
 
-    // Dora
     renderTiles(elDora, state.doraTiles);
     if (state.showUraDora) renderTiles(elUraDora, state.uraDoraTiles);
     else elUraDora.innerHTML = "";
 
-    // Riichi lock: hand unclickable
     renderTiles(elHand, state.hand, {
       clickable: !!state.drawn && !state.riichiLocked,
       onClick: (idx, t) => discardFromHand(idx, t),
     });
 
-    // Drawn always discardable
     renderSingleTile(elDrawn, state.drawn, {
       clickable: !!state.drawn,
       onClick: (t) => discardDrawn(t),
@@ -166,13 +190,7 @@
     elDrawCount.textContent = `ツモ ${state.draws} / ${GAME_MAX_DRAWS}（残り ${remaining}）`;
     elWallCount.textContent = `山 ${state.wall.length}`;
 
-    const canWin = !!state.drawn && MahHack.isAgari([...state.hand, state.drawn]);
-    btnWin.disabled = !canWin;
-
-    btnRiichi.disabled = !canRiichiNow();
-
-    // MVP rule: no ankan after riichi
-    btnAnkan.disabled = state.riichiLocked || !hasAnkanCandidate();
+    setControlsEnabled(!state.isEnded);
   }
 
   function endHand(msg) {
@@ -180,21 +198,17 @@
     state.isEnded = true;
     clearTimeout(state.autoTimer);
     if (msg) log(msg);
-    btnWin.disabled = true;
-    btnRiichi.disabled = true;
-    btnAnkan.disabled = true;
+    setControlsEnabled(false);
   }
 
   function newGame() {
-    // Battle init (only when pressing New)
     Battle.initBattle();
     renderBattleHud();
-
     startNextHand(true);
   }
 
   function startNextHand(isFirst = false) {
-    elLog.textContent = isFirst ? "" : elLog.textContent;
+    pendingNextHand = false;
 
     const wallAll = buildWall();
     const deadWall = wallAll.splice(-14);
@@ -227,10 +241,8 @@
       riichi: false,
       doubleRiichi: false,
       riichiTurnLocked: false,
-
       riichiLocked: false,
 
-      // Ippatsu flags (mahjong.js supports ctx.ippatsu)
       ippatsuEligible: false,
       ippatsuOnThisDraw: false,
 
@@ -241,9 +253,7 @@
       roundWind: "東",
     };
 
-    if (isFirst) {
-      log("新規開始：Battle開始");
-    }
+    if (isFirst) elLog.textContent = "";
     log("配牌13枚（親/場風=東 固定）");
     log(`ドラ: ${state.doraTiles[0]}`);
 
@@ -254,7 +264,7 @@
   function autoDrawFromLive() {
     if (!state || state.isEnded) return;
     if (state.drawn) return;
-    if (state.draws >= GAME_MAX_DRAWS) return; // ここには来ないはず
+    if (state.draws >= GAME_MAX_DRAWS) return;
     if (state.wall.length <= 0) return endHand("流局：山切れ");
 
     const t = state.wall.shift();
@@ -283,7 +293,6 @@
     log(`捨て: ${discardedTile}`);
     render();
 
-    // draw limit reached AFTER discard -> ryukyoku resolution
     if (state.draws >= GAME_MAX_DRAWS) {
       return resolveRyukyoku();
     }
@@ -407,6 +416,54 @@
     render();
   }
 
+  function openResultDialog(payload) {
+    // title/sub
+    elResultTitle.textContent = payload.title;
+    elResultSub.textContent = payload.sub;
+
+    // tiles
+    renderTiles(elResultHand, payload.handTiles || []);
+    renderTiles(elResultDora, payload.doraTiles || []);
+    renderTiles(elResultUraDora, payload.uraDoraTiles || []);
+
+    // yaku list
+    elResultYaku.innerHTML = "";
+    if (payload.yakuList && payload.yakuList.length > 0) {
+      for (const y of payload.yakuList) {
+        const li = document.createElement("li");
+        li.textContent = `${y.name}（${y.han}翻）`;
+        elResultYaku.appendChild(li);
+      }
+    } else {
+      const li = document.createElement("li");
+      li.textContent = "（なし）";
+      elResultYaku.appendChild(li);
+    }
+
+    // score/battle text
+    elResultScore.textContent = payload.scoreText || "";
+    elResultBattle.textContent = payload.battleText || "";
+
+    pendingNextHand = true;
+    dlg.showModal();
+  }
+
+  btnNextHand.addEventListener("click", () => {
+    if (dlg.open) dlg.close();
+    if (!pendingNextHand) return;
+
+    const b = Battle.snapshot();
+    renderBattleHud();
+    if (b && b.isEnded) {
+      endHand("GAME OVER（自分HPが0になりました）");
+      pendingNextHand = false;
+      return;
+    }
+
+    pendingNextHand = false;
+    startNextHand(false);
+  });
+
   function win() {
     if (!state || state.isEnded) return;
     if (!state.drawn) return;
@@ -458,58 +515,109 @@
     const yakuInfo = MahHack.detectYaku(tiles, ctx);
     const fu = MahHack.calcFu(tiles, yakuInfo, ctx);
     const han = yakuInfo.han;
-
     const pts = MahHack.calcPoints(han, fu, ctx.optMangan30fu4han);
 
-    log("=== 和了（ツモ） ===");
-    log(`和了牌: ${winTile} / 取得元: ${state.lastWinFrom}`);
-    log("役：");
-    for (const y of yakuInfo.yaku) log(`- ${y.name}：${y.han}翻`);
-    log(`合計：${han}翻 / ${fu}符`);
-    if (pts.limitName) log(`区分：${pts.limitName}`);
-    log(`合計点：${pts.total}`);
-
-    // ===== Battle apply: 得点 = ダメージ =====
+    // バトル適用（得点＝ダメージ）
     const before = Battle.snapshot();
-    const after = Battle.applyWin(pts.total);
+    const res = Battle.applyWin(pts.total);
+    const after = res.snap;
 
+    // 攻撃が入った場合
+    const attackText = res.attack ? `\n敵の攻撃：-${res.attack.damage}（2局ごと）` : "";
+
+    // 結果ダイアログ内容
+    const title = "和了（ツモ）";
+    const sub = `STAGE ${before.stage} → ${after.stage}`;
+    const scoreText =
+      `役：${han}翻 ${fu}符\n` +
+      (pts.limitName ? `区分：${pts.limitName}\n` : "") +
+      `合計点：${pts.total}`;
+
+    const battleText =
+      `与ダメージ：${pts.total}\n` +
+      `敵HP：${before.enemyHp} → ${after.enemyHp}\n` +
+      `自分HP：${before.playerHp} → ${after.playerHp}` +
+      attackText;
+
+    // ログにも残す
+    log("=== 和了（ツモ） ===");
+    for (const y of yakuInfo.yaku) log(`- ${y.name}：${y.han}翻`);
+    log(`合計：${han}翻 / ${fu}符 / 点=${pts.total}`);
     log(`ダメージ：${pts.total}（敵HP ${before.enemyHp} → ${after.enemyHp}）`);
-    if (after.stage !== before.stage) {
-      log(`敵撃破：次の敵へ（STAGE ${after.stage} / 敵HP ${after.enemyHp}）`);
-    }
+    if (res.attack) log(`敵の攻撃：-${res.attack.damage}（自分HP ${before.playerHp} → ${after.playerHp}）`);
+    if (res.killed) log(`敵撃破：STAGE ${after.stage} / 次の敵HP ${after.enemyHp}`);
 
+    endHand();
     render();
-    endHand("次局へ進みます");
-    startNextHand(false);
+
+    openResultDialog({
+      title,
+      sub,
+      handTiles: MahHack.sortTiles(tiles),
+      doraTiles: state.doraTiles,
+      uraDoraTiles: state.uraDoraTiles,
+      yakuList: yakuInfo.yaku,
+      scoreText,
+      battleText,
+    });
   }
 
   function resolveRyukyoku() {
-    // テンパイ判定：13枚手牌がテンパイなら waits>0
     const waits = MahHack.winningTilesFor13(state.hand);
     const isTenpai = waits.length > 0;
 
-    log("=== 流局 ===");
-    log(isTenpai ? `テンパイ（待ち=${waits.join(" ")}）` : "ノーテン");
-
     const before = Battle.snapshot();
     const res = Battle.applyRyukyoku(isTenpai);
+    const after = res.snap;
 
-    log(`ペナルティ：-${res.penalty}（自分HP ${before.playerHp} → ${res.playerHp}）`);
+    const attackText = res.attack ? `\n敵の攻撃：-${res.attack.damage}（2局ごと）` : "";
+    const title = "流局";
+    const sub = isTenpai ? `テンパイ（待ち：${waits.join(" ")}）` : "ノーテン";
+    const scoreText = `ペナルティ：-${res.penalty}`;
+    const battleText =
+      `自分HP：${before.playerHp} → ${after.playerHp}` + attackText + `\n` +
+      `敵HP：${before.enemyHp}（変化なし）`;
 
+    log("=== 流局 ===");
+    log(sub);
+    log(`ペナルティ：-${res.penalty}（自分HP ${before.playerHp} → ${after.playerHp}）`);
+    if (res.attack) log(`敵の攻撃：-${res.attack.damage}（2局ごと）`);
+
+    endHand();
     render();
-    if (res.isEnded) {
-      endHand("GAME OVER（自分HPが0になりました）");
-      return;
-    }
 
-    endHand("次局へ進みます");
-    startNextHand(false);
+    openResultDialog({
+      title,
+      sub,
+      handTiles: MahHack.sortTiles(state.hand),
+      doraTiles: state.doraTiles,
+      uraDoraTiles: [],
+      yakuList: [],
+      scoreText,
+      battleText,
+    });
   }
 
-  btnNew.addEventListener("click", newGame);
+  btnNew.addEventListener("click", () => {
+    Battle.initBattle();
+    renderBattleHud();
+    startNextHand(true);
+  });
   btnWin.addEventListener("click", win);
   btnRiichi.addEventListener("click", declareRiichi);
   btnAnkan.addEventListener("click", ankan);
+
+  function declareRiichi() {
+    if (!canRiichiNow()) return;
+
+    const isDouble = (state.draws === 1 && state.discards.length === 0);
+    state.riichi = !isDouble;
+    state.doubleRiichi = isDouble;
+    state.riichiTurnLocked = true;
+
+    log(isDouble ? "ダブルリーチ宣言（捨て牌で成立判定）" : "リーチ宣言（捨て牌で成立判定）");
+    render();
+  }
 
   // 初期表示
   renderBattleHud();
