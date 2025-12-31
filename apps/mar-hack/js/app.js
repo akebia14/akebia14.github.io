@@ -11,7 +11,12 @@
   const elDrawCount = $("drawCount");
   const elWallCount = $("wallCount");
 
-  // ★ドラは牌だけ
+  // Battle HUD
+  const elStage = $("stage");
+  const elPlayerHp = $("playerHp");
+  const elEnemyHp = $("enemyHp");
+
+  // Dora (tile only)
   const elDora = $("doraTile");
   const elUraDora = $("uraDoraTile");
 
@@ -87,6 +92,19 @@
     return { ind: base, ura: base + 1 };
   }
 
+  function renderBattleHud() {
+    const b = Battle.snapshot();
+    if (!b) {
+      elStage.textContent = "-";
+      elPlayerHp.textContent = "-";
+      elEnemyHp.textContent = "-";
+      return;
+    }
+    elStage.textContent = String(b.stage);
+    elPlayerHp.textContent = String(b.playerHp);
+    elEnemyHp.textContent = String(b.enemyHp);
+  }
+
   function scheduleAutoDraw() {
     if (!state) return;
     if (state.isEnded) return;
@@ -123,23 +141,20 @@
   function render() {
     if (!state) return;
 
-    // ドラ：牌のみ表示（カンドラが増えると並ぶ）
+    renderBattleHud();
+
+    // Dora
     renderTiles(elDora, state.doraTiles);
+    if (state.showUraDora) renderTiles(elUraDora, state.uraDoraTiles);
+    else elUraDora.innerHTML = "";
 
-    // 裏ドラ：リーチ和了後のみ牌表示
-    if (state.showUraDora) {
-      renderTiles(elUraDora, state.uraDoraTiles);
-    } else {
-      elUraDora.innerHTML = "";
-    }
-
-    // ★リーチ成立後は手牌を触れない（ツモ切りのみ）
+    // Riichi lock: hand unclickable
     renderTiles(elHand, state.hand, {
       clickable: !!state.drawn && !state.riichiLocked,
       onClick: (idx, t) => discardFromHand(idx, t),
     });
 
-    // ツモ牌は常に捨てられる（ツモ切り）
+    // Drawn always discardable
     renderSingleTile(elDrawn, state.drawn, {
       clickable: !!state.drawn,
       onClick: (t) => discardDrawn(t),
@@ -156,7 +171,7 @@
 
     btnRiichi.disabled = !canRiichiNow();
 
-    // ★リーチ後は暗槓禁止（MVP仕様）
+    // MVP rule: no ankan after riichi
     btnAnkan.disabled = state.riichiLocked || !hasAnkanCandidate();
   }
 
@@ -171,12 +186,19 @@
   }
 
   function newGame() {
-    elLog.textContent = "";
+    // Battle init (only when pressing New)
+    Battle.initBattle();
+    renderBattleHud();
+
+    startNextHand(true);
+  }
+
+  function startNextHand(isFirst = false) {
+    elLog.textContent = isFirst ? "" : elLog.textContent;
 
     const wallAll = buildWall();
     const deadWall = wallAll.splice(-14);
 
-    // UIは「表示牌」は出さないが、内部では保持する
     const doraIndicators = [deadWall[4]];
     const uraIndicators = [deadWall[5]];
     const doraTiles = [MahHack.nextDoraFromIndicator(deadWall[4])];
@@ -206,14 +228,12 @@
       doubleRiichi: false,
       riichiTurnLocked: false,
 
-      // ★リーチ成立後ロック（手牌変更不可）
       riichiLocked: false,
 
-      // ★一発用（mahjong.js側がctx.ippatsuを見て役付けする前提）
+      // Ippatsu flags (mahjong.js supports ctx.ippatsu)
       ippatsuEligible: false,
       ippatsuOnThisDraw: false,
 
-      // ★裏ドラ表示（和了後のみ）
       showUraDora: false,
       uraDoraTiles: [],
 
@@ -221,7 +241,10 @@
       roundWind: "東",
     };
 
-    log("新規開始：配牌13枚（親/場風=東 固定）");
+    if (isFirst) {
+      log("新規開始：Battle開始");
+    }
+    log("配牌13枚（親/場風=東 固定）");
     log(`ドラ: ${state.doraTiles[0]}`);
 
     render();
@@ -231,7 +254,7 @@
   function autoDrawFromLive() {
     if (!state || state.isEnded) return;
     if (state.drawn) return;
-    if (state.draws >= GAME_MAX_DRAWS) return endHand("流局：ツモ上限に到達");
+    if (state.draws >= GAME_MAX_DRAWS) return; // ここには来ないはず
     if (state.wall.length <= 0) return endHand("流局：山切れ");
 
     const t = state.wall.shift();
@@ -240,7 +263,6 @@
     state.lastDraw = t;
     state.lastWinFrom = "live";
 
-    // ★このツモが“一発対象ツモ”か確定
     state.ippatsuOnThisDraw = !!state.ippatsuEligible;
 
     log(`ツモ(${state.draws}): ${t}`);
@@ -248,24 +270,22 @@
   }
 
   function afterDiscardCommon(discardedTile) {
-    // 捨て牌を積む
     state.discards.push(discardedTile);
 
-    // 一発：対象ツモを和了しなかったので、捨てた時点で消滅
     if (state.ippatsuOnThisDraw) {
       state.ippatsuEligible = false;
       state.ippatsuOnThisDraw = false;
     }
 
-    // 捨て牌後に理牌
     state.hand = MahHack.sortTiles(state.hand);
     state.drawn = null;
 
     log(`捨て: ${discardedTile}`);
     render();
 
+    // draw limit reached AFTER discard -> ryukyoku resolution
     if (state.draws >= GAME_MAX_DRAWS) {
-      return endHand("流局：上限ツモ終了時点で和了なし");
+      return resolveRyukyoku();
     }
     scheduleAutoDraw();
   }
@@ -274,17 +294,14 @@
     if (!state || state.isEnded) return;
     if (!state.drawn) return;
 
-    // ★リーチ成立後は手牌を変更できない（ツモ切りのみ）
     if (state.riichiLocked) {
       log("リーチ後は手牌を変更できません（ツモ切りのみ）");
       return;
     }
 
-    // 手牌から捨て → ツモ牌を手牌に入れる
     state.hand.splice(idx, 1);
     state.hand.push(state.drawn);
 
-    // リーチ成立判定（宣言後、捨ててテンパイなら成立）
     if (state.riichiTurnLocked) {
       const waits = MahHack.winningTilesFor13(state.hand);
       if (waits.length === 0) {
@@ -294,8 +311,8 @@
         state.riichiLocked = false;
       } else {
         log(`リーチ成立：待ち=${waits.join(" ")}`);
-        state.ippatsuEligible = true;   // 次ツモが一発対象
-        state.riichiLocked = true;      // ★ここから先は手牌変更不可
+        state.ippatsuEligible = true;
+        state.riichiLocked = true;
       }
       state.riichiTurnLocked = false;
     }
@@ -308,7 +325,6 @@
     if (!state.drawn) return;
     if (t !== state.drawn) return;
 
-    // リーチ成立判定（ツモ切りでも、捨てた後がテンパイなら成立）
     if (state.riichiTurnLocked) {
       const waits = MahHack.winningTilesFor13(state.hand);
       if (waits.length === 0) {
@@ -319,7 +335,7 @@
       } else {
         log(`リーチ成立：待ち=${waits.join(" ")}`);
         state.ippatsuEligible = true;
-        state.riichiLocked = true; // ★ここから先はツモ切りのみ
+        state.riichiLocked = true;
       }
       state.riichiTurnLocked = false;
     }
@@ -330,9 +346,7 @@
   function declareRiichi() {
     if (!canRiichiNow()) return;
 
-    // ★ダブルリーチは「初ツモ後〜初捨て牌前」限定（draws===1 & discards===0）
     const isDouble = (state.draws === 1 && state.discards.length === 0);
-
     state.riichi = !isDouble;
     state.doubleRiichi = isDouble;
     state.riichiTurnLocked = true;
@@ -345,13 +359,11 @@
     if (!state || state.isEnded) return;
     if (!state.drawn) return;
 
-    // ★リーチ後は暗槓を禁止（MVP仕様）
     if (state.riichiLocked || state.riichi || state.doubleRiichi) {
       log("リーチ後は暗槓できません（MVP仕様）");
       return;
     }
 
-    // カンしたら一発権利は消える（将来の仕様拡張のため）
     state.ippatsuEligible = false;
     state.ippatsuOnThisDraw = false;
 
@@ -371,7 +383,6 @@
 
     state.kanCount += 1;
 
-    // カンドラ（表示牌は出さないが、ドラ牌は増やす）
     const idx = deadWallIndicesForKandora(state.kanCount);
     const ind = state.deadWall[idx.ind];
     const uraInd = state.deadWall[idx.ura];
@@ -379,11 +390,11 @@
 
     state.doraIndicators.push(ind);
     state.uraIndicators.push(uraInd);
-    state.doraTiles.push(MahHack.nextDoraFromIndicator(ind));
+    const newDora = MahHack.nextDoraFromIndicator(ind);
+    state.doraTiles.push(newDora);
 
-    log(`暗槓: ${tile}（ドラ追加: ${MahHack.nextDoraFromIndicator(ind)}）`);
+    log(`暗槓: ${tile}（ドラ追加: ${newDora}）`);
 
-    // 嶺上ツモ
     const rinshanTile = state.deadWall.pop();
     if (!rinshanTile) return endHand("流局：王牌不足");
 
@@ -409,7 +420,6 @@
     const haitei = (state.lastWinFrom === "live" && state.wall.length === 0);
     const rinshan = (state.lastWinFrom === "rinshan");
 
-    // 裏ドラはリーチ和了時に確定表示
     const uraDoraTiles = (state.riichi || state.doubleRiichi)
       ? state.uraIndicators.map(MahHack.nextDoraFromIndicator)
       : [];
@@ -426,8 +436,6 @@
 
       riichi: state.riichi,
       doubleRiichi: state.doubleRiichi,
-
-      // ★一発（mahjong.js側が対応している前提）
       ippatsu: state.ippatsuOnThisDraw === true,
 
       haitei,
@@ -448,30 +456,54 @@
     };
 
     const yakuInfo = MahHack.detectYaku(tiles, ctx);
-
-    log("=== 和了（ツモ） ===");
-    log(`和了牌: ${winTile} / 取得元: ${state.lastWinFrom}`);
-    if (haitei) log("イベント：海底摸月");
-    if (rinshan) log("イベント：嶺上開花");
-    if (state.doubleRiichi) log("イベント：ダブルリーチ");
-    else if (state.riichi) log("イベント：リーチ");
-    if (ctx.ippatsu) log("イベント：一発");
-
-    log("役：");
-    for (const y of yakuInfo.yaku) log(`- ${y.name}：${y.han}翻`);
-
     const fu = MahHack.calcFu(tiles, yakuInfo, ctx);
     const han = yakuInfo.han;
 
-    log(`合計：${han}翻 / ${fu}符`);
-
     const pts = MahHack.calcPoints(han, fu, ctx.optMangan30fu4han);
+
+    log("=== 和了（ツモ） ===");
+    log(`和了牌: ${winTile} / 取得元: ${state.lastWinFrom}`);
+    log("役：");
+    for (const y of yakuInfo.yaku) log(`- ${y.name}：${y.han}翻`);
+    log(`合計：${han}翻 / ${fu}符`);
     if (pts.limitName) log(`区分：${pts.limitName}`);
-    log(`basic points：${pts.basePoints}`);
-    log(`合計点(便宜スカラー)：${pts.total}`);
+    log(`合計点：${pts.total}`);
+
+    // ===== Battle apply: 得点 = ダメージ =====
+    const before = Battle.snapshot();
+    const after = Battle.applyWin(pts.total);
+
+    log(`ダメージ：${pts.total}（敵HP ${before.enemyHp} → ${after.enemyHp}）`);
+    if (after.stage !== before.stage) {
+      log(`敵撃破：次の敵へ（STAGE ${after.stage} / 敵HP ${after.enemyHp}）`);
+    }
 
     render();
-    endHand();
+    endHand("次局へ進みます");
+    startNextHand(false);
+  }
+
+  function resolveRyukyoku() {
+    // テンパイ判定：13枚手牌がテンパイなら waits>0
+    const waits = MahHack.winningTilesFor13(state.hand);
+    const isTenpai = waits.length > 0;
+
+    log("=== 流局 ===");
+    log(isTenpai ? `テンパイ（待ち=${waits.join(" ")}）` : "ノーテン");
+
+    const before = Battle.snapshot();
+    const res = Battle.applyRyukyoku(isTenpai);
+
+    log(`ペナルティ：-${res.penalty}（自分HP ${before.playerHp} → ${res.playerHp}）`);
+
+    render();
+    if (res.isEnded) {
+      endHand("GAME OVER（自分HPが0になりました）");
+      return;
+    }
+
+    endHand("次局へ進みます");
+    startNextHand(false);
   }
 
   btnNew.addEventListener("click", newGame);
@@ -479,5 +511,7 @@
   btnRiichi.addEventListener("click", declareRiichi);
   btnAnkan.addEventListener("click", ankan);
 
+  // 初期表示
+  renderBattleHud();
   log("「新規開始」を押してください。");
 })();
