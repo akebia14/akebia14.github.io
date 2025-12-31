@@ -117,28 +117,27 @@
     .rarity-common {
       color: #000000;
     }
-    
+
     .rarity-uncommon {
       color: #1aa34a; /* green */
       font-weight: 600;
     }
-    
+
     .rarity-rare {
       color: #1e6bff; /* blue */
       font-weight: 700;
     }
-    
+
     .rarity-epic {
       color: #8b3fd9; /* purple */
       font-weight: 800;
     }
-    
+
     .rarity-legendary {
       color: #f2b705; /* yellow */
       font-weight: 900;
       text-shadow: 0 0 4px rgba(242, 183, 5, 0.6);
     }
-
 
     .hint {
       font-size: 12px;
@@ -176,6 +175,13 @@
         Lv <span id="lvDps">-</span> +
         武器 <span id="weaponDps">-</span><br>
         ClickDMG: <span id="clickDmg">-</span><br>
+
+        <!-- ここから追加（武器オプション反映の現在値） -->
+        CRIT率: <span id="critChance">-</span><br>
+        CRIT倍率: <span id="critMult">-</span><br>
+        Gold倍率: <span id="goldMult">-</span><br>
+        <!-- ここまで追加 -->
+
         Gold: <span id="gold">-</span><br>
         撃破数: <span id="runs">-</span>
       </div>
