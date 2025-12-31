@@ -718,12 +718,9 @@
    * Rendering
    *********************/
   function rarityCssClass(rarity) {
-    // 既存CSS（rare-common / rare-rare）がある前提でも崩れないようにフォールバックします
-    // さらに区別したい場合は index.html のCSSに .rarity-* を追加してください
-    if (rarity === 'common' || rarity === 'uncommon') return 'rare-common';
-    if (rarity === 'rare' || rarity === 'epic' || rarity === 'legendary') return 'rare-rare';
-    return 'rare-common';
-  }
+  return `rarity-${rarity}`;
+}
+
 
   function weaponLabel(w) {
     if (!w) return '---';
