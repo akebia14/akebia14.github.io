@@ -184,6 +184,13 @@
       onClick: (t) => discardDrawn(t),
     });
 
+    const e = Battle.snapshot();
+    enemyImg.src = e.enemyImg;
+    enemyInfo.textContent = `攻撃まであと${e.nextAtkIn}ターン（${e.atkMin}～${e.atkMax}）`;
+    enemyHpText.textContent = `${e.enemyHp} / ${e.enemyMaxHp}`;
+    enemyHpBar.style.width = `${(e.enemyHp / e.enemyMaxHp) * 100}%`;
+
+
     renderTiles(elDiscards, state.discards);
 
     const remaining = Math.max(0, GAME_MAX_DRAWS - state.draws);
