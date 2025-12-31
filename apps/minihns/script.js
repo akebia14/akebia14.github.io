@@ -2,22 +2,24 @@
   'use strict';
 
   /******************************************************************
-   * Phase 5 + Phase 6 Integrated Game Logic (script.js)
-   * - Phase5: Scaling unified by kills (enemy HP, gold, weapon DPS)
-   * - Phase6: Rarity 5 tiers (Common/Uncommon/Rare/Epic/Legendary)
-   * - Boss rarity: Common = 0, redistributed to others (fixed weights)
-   * - Keeps: auto DPS tick, click dmg, inventory(5), equip(1), float dmg,
-   *          boss every 10, kill fx, save/load, renderFast/renderSlow split
+   * Phase 5+6 + Weapon Options Expansion
+   * - Weapon must have:
+   *   - DPS (auto damage per second add)
+   *   - DPC (click damage add)
+   * - Rarity-based extra options (random):
+   *   - critChanceAdd (additive)
+   *   - critMultAdd (additive to multiplier)
+   *   - goldMultAdd (additive to gold multiplier)
    *
-   * NOTE:
-   * - Critical applies to CLICK only (avoid tick spam).
+   * Notes:
+   * - Critical applies to CLICK only.
+   * - Inventory button stability: renderFast/renderSlow split maintained.
    ******************************************************************/
 
   /*********************
    * Constants
    *********************/
-  const SAVE_KEY = 'mini_hns_phase5_6_v1';
-
+  const SAVE_KEY = 'mini_hns_phase5_6_opts_v1';
   const TICK_MS = 100;
 
   // Progression base (Phase5 scaling)
@@ -25,7 +27,7 @@
   const ENEMY_HP_GROWTH_PER_KILL = 10;
 
   const BASE_GOLD_REWARD = 10;
-  const GOLD_GROWTH_PER_KILL = 1; // kills で線形増加（固定）
+  const GOLD_GROWTH_PER_KILL = 1; // killsで線形増加
 
   // Upgrades
   const BASE_DPS = 5;
@@ -33,6 +35,7 @@
   const DPS_UPGRADE_BASE_COST = 20;
   const DPS_UPGRADE_COST_RATE = 1.5;
 
+  // Click base
   const BASE_CLICK_DMG = 1;
   const CLICK_DMG_PER_LEVEL = 1;
   const CLICK_UPGRADE_BASE_COST = 15;
@@ -62,11 +65,11 @@
   const BOSS_HP_MULT = 5;
   const BOSS_GOLD_MULT = 5;
 
-  // Critical (click only)
-  const CRIT_CHANCE = 0.05;
-  const CRIT_MULT = 2.0;
+  // Base Critical (click only)
+  const BASE_CRIT_CHANCE = 0.05;
+  const BASE_CRIT_MULT = 2.0;
 
-  // Phase6: Rarity definition
+  // Phase6: Rarity
   const RARITIES = /** @type {const} */ ([
     'common',
     'uncommon',
@@ -92,8 +95,7 @@
     legendary: 1,
   };
 
-  // Boss drop distribution (sum 100)
-  // User request: Common = 0, redistribute to others
+  // Boss drop distribution (sum 100) - Common = 0
   const DROP_WEIGHTS_BOSS = {
     common: 0,
     uncommon: 43,
@@ -102,13 +104,18 @@
     legendary: 7,
   };
 
-  // Phase5+6: Weapon DPS scaling
-  // base grows with kills; rarity adds multiplier
+  // Phase5+6: Weapon scaling
+  // DPS base range grows with kills; rarity applies multiplier
   const WEAPON_DPS_BASE_MIN = 1;
   const WEAPON_DPS_BASE_MAX = 3;
-  const WEAPON_DPS_GROWTH_PER_KILL = 0.35; // killsで基礎レンジが伸びる（固定）
+  const WEAPON_DPS_GROWTH_PER_KILL = 0.35;
 
-  const RARITY_DPS_MULT = {
+  // DPC base range grows with kills; tuned lower than DPS
+  const WEAPON_DPC_BASE_MIN = 0;
+  const WEAPON_DPC_BASE_MAX = 2;
+  const WEAPON_DPC_GROWTH_PER_KILL = 0.20;
+
+  const RARITY_POWER_MULT = {
     common: 1.0,
     uncommon: 1.25,
     rare: 1.6,
@@ -116,7 +123,42 @@
     legendary: 2.8,
   };
 
-  // Weapon name generation (Phase6)
+  // Rarity-based option counts (extra options)
+  // common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 3
+  const EXTRA_OPT_COUNT = {
+    common: 0,
+    uncommon: 1,
+    rare: 2,
+    epic: 3,
+    legendary: 3,
+  };
+
+  // Option value ranges by rarity
+  // critChanceAdd in [min,max] (e.g., 0.01 = +1%)
+  const OPT_RANGES = {
+    uncommon: {
+      critChanceAdd: [0.01, 0.03],
+      critMultAdd: [0.10, 0.25],
+      goldMultAdd: [0.05, 0.15],
+    },
+    rare: {
+      critChanceAdd: [0.02, 0.06],
+      critMultAdd: [0.20, 0.50],
+      goldMultAdd: [0.10, 0.30],
+    },
+    epic: {
+      critChanceAdd: [0.04, 0.10],
+      critMultAdd: [0.40, 0.90],
+      goldMultAdd: [0.20, 0.60],
+    },
+    legendary: {
+      critChanceAdd: [0.06, 0.15],
+      critMultAdd: [0.70, 1.50],
+      goldMultAdd: [0.40, 1.20],
+    },
+  };
+
+  // Weapon name generation
   const TYPES = ['Sword', 'Axe', 'Dagger', 'Mace', 'Spear'];
 
   const PREFIX_BY_RARITY = {
@@ -139,7 +181,14 @@
    * State
    *********************/
   /** Weapon shape:
-   * { id: string, name: string, rarity: 'common'|'uncommon'|'rare'|'epic'|'legendary', dps: number }
+   * {
+   *  id: string,
+   *  name: string,
+   *  rarity: 'common'|'uncommon'|'rare'|'epic'|'legendary',
+   *  dps: number,
+   *  dpc: number,
+   *  opts: { critChanceAdd:number, critMultAdd:number, goldMultAdd:number }
+   * }
    */
   let state = {
     gold: 0,
@@ -152,7 +201,14 @@
     enemyImageNo: 1,
     isBoss: false,
 
-    equippedWeapon: { id: 'weapon_fist', name: '素手', rarity: 'common', dps: 0 },
+    equippedWeapon: {
+      id: 'weapon_fist',
+      name: '素手',
+      rarity: 'common',
+      dps: 0,
+      dpc: 0,
+      opts: { critChanceAdd: 0, critMultAdd: 0, goldMultAdd: 0 }
+    },
     inventory: [],
     droppedWeapon: null,
 
@@ -160,8 +216,6 @@
   };
 
   let timerId = null;
-
-  // Heavy UI rebuild only when changed
   let needsSlowRender = true;
 
   /*********************
@@ -237,6 +291,10 @@
     return min + Math.floor(Math.random() * (max - min + 1));
   }
 
+  function randFloat(min, max) {
+    return min + Math.random() * (max - min);
+  }
+
   function makeId(prefix) {
     return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
   }
@@ -254,19 +312,58 @@
     return Math.max(min, Math.min(max, n));
   }
 
+  function pct(n) {
+    return `${Math.round(n * 100)}%`;
+  }
+
   /*********************
-   * Calculations
+   * Core Calculations
    *********************/
   function calcDpsFromLevel() {
     return state.dpsLevel * DPS_PER_LEVEL;
   }
 
-  function calcTotalDps() {
-    return BASE_DPS + calcDpsFromLevel() + (state.equippedWeapon?.dps || 0);
+  function weaponStats() {
+    const w = state.equippedWeapon;
+    return {
+      dps: Number(w?.dps) || 0,
+      dpc: Number(w?.dpc) || 0,
+      opts: {
+        critChanceAdd: Number(w?.opts?.critChanceAdd) || 0,
+        critMultAdd: Number(w?.opts?.critMultAdd) || 0,
+        goldMultAdd: Number(w?.opts?.goldMultAdd) || 0,
+      }
+    };
   }
 
-  function calcClickDmgBase() {
+  function calcTotalDps() {
+    const w = weaponStats();
+    return BASE_DPS + calcDpsFromLevel() + w.dps;
+  }
+
+  function calcClickDmgBaseOnly() {
     return BASE_CLICK_DMG + state.clickLevel * CLICK_DMG_PER_LEVEL;
+  }
+
+  function calcClickDmgTotal() {
+    const w = weaponStats();
+    return calcClickDmgBaseOnly() + w.dpc;
+  }
+
+  function calcCritChance() {
+    const w = weaponStats();
+    return clamp(BASE_CRIT_CHANCE + w.opts.critChanceAdd, 0, 0.75);
+  }
+
+  function calcCritMult() {
+    const w = weaponStats();
+    return clamp(BASE_CRIT_MULT + w.opts.critMultAdd, 1.0, 10.0);
+  }
+
+  function calcGoldMult() {
+    const w = weaponStats();
+    // additive: 0.20 = +20% => x1.20
+    return clamp(1.0 + w.opts.goldMultAdd, 1.0, 100.0);
   }
 
   function calcDpsUpgradeCost() {
@@ -286,7 +383,7 @@
   }
 
   /*********************
-   * Phase5: Scaling (unified by kills)
+   * Phase5: Scaling unified by kills
    *********************/
   function hpBaseByKills(kills) {
     return BASE_ENEMY_HP + kills * ENEMY_HP_GROWTH_PER_KILL;
@@ -296,24 +393,28 @@
     return BASE_GOLD_REWARD + kills * GOLD_GROWTH_PER_KILL;
   }
 
-  function weaponBaseRangeByKills(kills) {
-    // Base range grows gradually with kills
+  function weaponDpsBaseRangeByKills(kills) {
     const add = kills * WEAPON_DPS_GROWTH_PER_KILL;
     const min = WEAPON_DPS_BASE_MIN + Math.floor(add);
     const max = WEAPON_DPS_BASE_MAX + Math.floor(add * 1.2);
     return { min, max: Math.max(min, max) };
   }
 
+  function weaponDpcBaseRangeByKills(kills) {
+    const add = kills * WEAPON_DPC_GROWTH_PER_KILL;
+    const min = WEAPON_DPC_BASE_MIN + Math.floor(add * 0.7);
+    const max = WEAPON_DPC_BASE_MAX + Math.floor(add * 1.0);
+    return { min, max: Math.max(min, max) };
+  }
+
   /*********************
-   * Phase6: Rarity roll
+   * Phase6: Rarity and option roll
    *********************/
   function rollRarity(isBossDrop) {
     const weights = isBossDrop ? DROP_WEIGHTS_BOSS : DROP_WEIGHTS_NORMAL;
-
     const total = RARITIES.reduce((sum, r) => sum + (weights[r] || 0), 0);
-    // total should be 100 by design, but calculate anyway.
-    let roll = Math.random() * total;
 
+    let roll = Math.random() * total;
     for (const r of RARITIES) {
       roll -= (weights[r] || 0);
       if (roll < 0) return r;
@@ -332,23 +433,61 @@
     return `${prefix} ${type} ${suffix}`;
   }
 
+  function pickUnique(arr, count) {
+    const copy = arr.slice();
+    const out = [];
+    const c = Math.min(count, copy.length);
+    for (let i = 0; i < c; i++) {
+      const idx = randInt(0, copy.length - 1);
+      out.push(copy.splice(idx, 1)[0]);
+    }
+    return out;
+  }
+
+  function rollExtraOptions(rarity) {
+    const count = EXTRA_OPT_COUNT[rarity] || 0;
+    if (count <= 0) {
+      return { critChanceAdd: 0, critMultAdd: 0, goldMultAdd: 0 };
+    }
+
+    const pool = ['critChanceAdd', 'critMultAdd', 'goldMultAdd'];
+    const chosen = pickUnique(pool, count);
+
+    const base = OPT_RANGES[rarity];
+    const opts = { critChanceAdd: 0, critMultAdd: 0, goldMultAdd: 0 };
+
+    for (const key of chosen) {
+      const [min, max] = base[key];
+      // store with 3-decimal precision to keep text stable
+      opts[key] = Math.round(randFloat(min, max) * 1000) / 1000;
+    }
+    return opts;
+  }
+
   function rollWeapon(isBossDrop) {
     const rarity = rollRarity(isBossDrop);
+    const mult = RARITY_POWER_MULT[rarity] || 1.0;
 
-    const baseRange = weaponBaseRangeByKills(state.kills);
-    const mult = RARITY_DPS_MULT[rarity] || 1.0;
+    const dpsBase = weaponDpsBaseRangeByKills(state.kills);
+    const dpcBase = weaponDpcBaseRangeByKills(state.kills);
 
-    // Apply multiplier to base range
-    const min = Math.max(1, Math.floor(baseRange.min * mult));
-    const max = Math.max(min, Math.floor(baseRange.max * mult));
+    const dpsMin = Math.max(0, Math.floor(dpsBase.min * mult));
+    const dpsMax = Math.max(dpsMin, Math.floor(dpsBase.max * mult));
+    const dps = randInt(dpsMin, dpsMax);
 
-    const dps = randInt(min, max);
+    const dpcMin = Math.max(0, Math.floor(dpcBase.min * mult));
+    const dpcMax = Math.max(dpcMin, Math.floor(dpcBase.max * mult));
+    const dpc = randInt(dpcMin, dpcMax);
+
+    const opts = rollExtraOptions(rarity);
 
     return {
       id: makeId('weapon'),
       name: rollWeaponName(rarity),
       rarity,
       dps,
+      dpc,
+      opts
     };
   }
 
@@ -356,10 +495,9 @@
    * Save / Load
    *********************/
   function normalizeRarity(r) {
-    // backward compatibility: old version used 'rare' vs 'common'
-    if (r === 'rare') return 'rare';
     if (r === 'common') return 'common';
     if (r === 'uncommon') return 'uncommon';
+    if (r === 'rare') return 'rare';
     if (r === 'epic') return 'epic';
     if (r === 'legendary') return 'legendary';
     return 'common';
@@ -367,11 +505,19 @@
 
   function normalizeWeapon(w) {
     if (!w || typeof w !== 'object') return null;
+
+    const rarity = normalizeRarity(w.rarity);
     return {
       id: String(w.id || makeId('weapon')),
       name: String(w.name || 'Unknown Weapon'),
-      rarity: normalizeRarity(w.rarity),
-      dps: Number(w.dps) || 0
+      rarity,
+      dps: Number(w.dps) || 0,
+      dpc: Number(w.dpc) || 0,
+      opts: {
+        critChanceAdd: Number(w.opts?.critChanceAdd) || 0,
+        critMultAdd: Number(w.opts?.critMultAdd) || 0,
+        goldMultAdd: Number(w.opts?.goldMultAdd) || 0,
+      }
     };
   }
 
@@ -400,7 +546,14 @@
       state.isBoss = Boolean(parsed.isBoss);
 
       const eq = normalizeWeapon(parsed.equippedWeapon);
-      state.equippedWeapon = eq || { id: 'weapon_fist', name: '素手', rarity: 'common', dps: 0 };
+      state.equippedWeapon = eq || {
+        id: 'weapon_fist',
+        name: '素手',
+        rarity: 'common',
+        dps: 0,
+        dpc: 0,
+        opts: { critChanceAdd: 0, critMultAdd: 0, goldMultAdd: 0 }
+      };
 
       state.inventory = Array.isArray(parsed.inventory)
         ? parsed.inventory.slice(0, INVENTORY_SIZE).map(normalizeWeapon).filter(Boolean)
@@ -437,7 +590,14 @@
       enemyImageNo: 1,
       isBoss: false,
 
-      equippedWeapon: { id: 'weapon_fist', name: '素手', rarity: 'common', dps: 0 },
+      equippedWeapon: {
+        id: 'weapon_fist',
+        name: '素手',
+        rarity: 'common',
+        dps: 0,
+        dpc: 0,
+        opts: { critChanceAdd: 0, critMultAdd: 0, goldMultAdd: 0 }
+      },
       inventory: [],
       droppedWeapon: null,
 
@@ -489,7 +649,7 @@
   }
 
   /*********************
-   * Enemy setup
+   * Enemy setup & Rewards
    *********************/
   function prepareNextEnemy() {
     const n = currentEnemyNumber();
@@ -506,7 +666,10 @@
 
   function rewardGold() {
     const base = goldBaseByKills(state.kills);
-    const gold = state.isBoss ? base * BOSS_GOLD_MULT : base;
+    const bossMult = state.isBoss ? BOSS_GOLD_MULT : 1;
+    const wGoldMult = calcGoldMult();
+
+    const gold = Math.floor(base * bossMult * wGoldMult);
     state.gold += gold;
     return gold;
   }
@@ -534,7 +697,7 @@
     if (!w) return;
     state.equippedWeapon = w;
     needsSlowRender = true;
-    log(`装備変更：${w.name}（${RARITY_LABEL[w.rarity]} / +${w.dps} DPS）/ 総DPS=${calcTotalDps()}`);
+    log(`装備変更：${w.name}（${RARITY_LABEL[w.rarity]} / DPS+${w.dps} / DPC+${w.dpc}）`);
   }
 
   function equipDropWeapon() {
@@ -542,12 +705,14 @@
     state.equippedWeapon = state.droppedWeapon;
     state.droppedWeapon = null;
     needsSlowRender = true;
-    log(`装備変更：${state.equippedWeapon.name}（${RARITY_LABEL[state.equippedWeapon.rarity]} / +${state.equippedWeapon.dps} DPS）/ 総DPS=${calcTotalDps()}`);
+    const w = state.equippedWeapon;
+    log(`装備変更：${w.name}（${RARITY_LABEL[w.rarity]} / DPS+${w.dps} / DPC+${w.dpc}）`);
   }
 
   function discardDropWeapon() {
     if (!state.droppedWeapon) return;
-    log(`武器破棄：${state.droppedWeapon.name}（${RARITY_LABEL[state.droppedWeapon.rarity]} / +${state.droppedWeapon.dps} DPS）`);
+    const w = state.droppedWeapon;
+    log(`武器破棄：${w.name}（${RARITY_LABEL[w.rarity]} / DPS+${w.dps} / DPC+${w.dpc}）`);
     state.droppedWeapon = null;
     needsSlowRender = true;
   }
@@ -556,7 +721,8 @@
     if (!state.droppedWeapon) return;
 
     if (addToInventory(state.droppedWeapon)) {
-      log(`インベントリに追加：${state.droppedWeapon.name}（${RARITY_LABEL[state.droppedWeapon.rarity]} / +${state.droppedWeapon.dps} DPS）`);
+      const w = state.droppedWeapon;
+      log(`インベントリに追加：${w.name}（${RARITY_LABEL[w.rarity]} / DPS+${w.dps} / DPC+${w.dpc}）`);
       state.droppedWeapon = null;
       needsSlowRender = true;
     } else {
@@ -569,17 +735,19 @@
     if (!state.droppedWeapon) return;
     if (idx < 0 || idx >= INVENTORY_SIZE) return;
 
+    const drop = state.droppedWeapon;
+
     if (idx < state.inventory.length) {
       const removed = state.inventory[idx];
-      state.inventory[idx] = state.droppedWeapon;
-      log(`置換：${removed.name}（${RARITY_LABEL[removed.rarity]}） → ${state.inventory[idx].name}（${RARITY_LABEL[state.inventory[idx].rarity]}）`);
+      state.inventory[idx] = drop;
+      log(`置換：${removed.name}（${RARITY_LABEL[removed.rarity]}） → ${drop.name}（${RARITY_LABEL[drop.rarity]}）`);
       state.droppedWeapon = null;
       needsSlowRender = true;
       return;
     }
 
-    if (addToInventory(state.droppedWeapon)) {
-      log(`インベントリに追加：${state.droppedWeapon.name}（${RARITY_LABEL[state.droppedWeapon.rarity]}）`);
+    if (addToInventory(drop)) {
+      log(`インベントリに追加：${drop.name}（${RARITY_LABEL[drop.rarity]}）`);
       state.droppedWeapon = null;
       needsSlowRender = true;
     } else {
@@ -603,9 +771,9 @@
     if (!isInventoryFull()) {
       addToInventory(drop);
       state.droppedWeapon = null;
-      log(`撃破！ +${gold}G / 武器取得：${drop.name}（${RARITY_LABEL[drop.rarity]} / +${drop.dps} DPS）`);
+      log(`撃破！ +${gold}G / 武器取得：${drop.name}（${RARITY_LABEL[drop.rarity]} / DPS+${drop.dps} / DPC+${drop.dpc}）`);
     } else {
-      log(`撃破！ +${gold}G / 武器ドロップ：${drop.name}（${RARITY_LABEL[drop.rarity]} / +${drop.dps} DPS）→ 置換 or 破棄`);
+      log(`撃破！ +${gold}G / 武器ドロップ：${drop.name}（${RARITY_LABEL[drop.rarity]} / DPS+${drop.dps} / DPC+${drop.dpc}）→ 置換 or 破棄`);
     }
 
     needsSlowRender = true;
@@ -622,7 +790,7 @@
     prepareNextEnemy();
 
     const n = currentEnemyNumber();
-    log(`周回開始：敵#${n}${state.isBoss ? '（BOSS）' : ''} / 総DPS=${calcTotalDps()}`);
+    log(`周回開始：敵#${n}${state.isBoss ? '（BOSS）' : ''} / 総DPS=${calcTotalDps()} / ClickDMG=${calcClickDmgTotal()}`);
 
     timerId && clearInterval(timerId);
     timerId = setInterval(tick, TICK_MS);
@@ -658,15 +826,16 @@
    * Click attack (+crit)
    *********************/
   function rollCrit() {
-    return Math.random() < CRIT_CHANCE;
+    return Math.random() < calcCritChance();
   }
 
   function clickAttack() {
     if (!state.inRun) return;
 
-    const base = calcClickDmgBase();
+    const base = calcClickDmgTotal();
     const isCrit = rollCrit();
-    const dmg = isCrit ? Math.floor(base * CRIT_MULT) : base;
+    const mult = calcCritMult();
+    const dmg = isCrit ? Math.floor(base * mult) : base;
 
     spawnDamageFloat(isCrit ? `CRIT! -${dmg}` : `-${dmg}`);
 
@@ -695,7 +864,6 @@
     state.gold -= cost;
     state.dpsLevel += 1;
     log(`DPS強化：Lv${state.dpsLevel}（総DPS=${calcTotalDps()}）`);
-
     save();
     renderFast();
   }
@@ -708,8 +876,7 @@
     }
     state.gold -= cost;
     state.clickLevel += 1;
-    log(`クリック強化：Lv${state.clickLevel}（ClickDMG=${calcClickDmgBase()} / Crit x${CRIT_MULT}）`);
-
+    log(`クリック強化：Lv${state.clickLevel}（ClickDMG=${calcClickDmgTotal()}）`);
     save();
     renderFast();
   }
@@ -718,15 +885,24 @@
    * Rendering
    *********************/
   function rarityCssClass(rarity) {
-  return `rarity-${rarity}`;
-}
+    return `rarity-${rarity}`;
+  }
 
+  function optsSummary(w) {
+    if (!w || !w.opts) return '';
+    const parts = [];
+    if (w.opts.critChanceAdd > 0) parts.push(`CRIT率+${pct(w.opts.critChanceAdd)}`);
+    if (w.opts.critMultAdd > 0) parts.push(`CRIT倍+${w.opts.critMultAdd.toFixed(2)}`);
+    if (w.opts.goldMultAdd > 0) parts.push(`G+${pct(w.opts.goldMultAdd)}`);
+    return parts.length ? ` / ${parts.join(' / ')}` : '';
+  }
 
   function weaponLabel(w) {
     if (!w) return '---';
     const cls = rarityCssClass(w.rarity);
     const label = RARITY_LABEL[w.rarity] || 'Common';
-    return `<span class="${cls}">${label}：${escapeHtml(w.name)}（+${w.dps} DPS）</span>`;
+
+    return `<span class="${cls}">${label}：${escapeHtml(w.name)}（DPS+${w.dps} / DPC+${w.dpc}${escapeHtml(optsSummary(w))}）</span>`;
   }
 
   // Fast: update numeric/status only
@@ -746,9 +922,10 @@
     elTotalDps.textContent = total;
     elBaseDps.textContent = BASE_DPS;
     elLvDps.textContent = calcDpsFromLevel();
-    elWeaponDps.textContent = state.equippedWeapon?.dps || 0;
+    elWeaponDps.textContent = weaponStats().dps;
 
-    elClickDmg.textContent = calcClickDmgBase();
+    // ClickDMG表示は「基礎 + 武器DPC」
+    elClickDmg.textContent = calcClickDmgTotal();
 
     elDpsLevel.textContent = state.dpsLevel;
     elDpsCost.textContent = calcDpsUpgradeCost();
@@ -805,7 +982,6 @@
   function renderSlow() {
     elEquippedWeapon.innerHTML = weaponLabel(state.equippedWeapon);
     elDroppedWeapon.innerHTML = weaponLabel(state.droppedWeapon);
-
     renderInventory();
     renderDropControls();
   }
@@ -889,7 +1065,9 @@
 
       if (act === 'discardInv') {
         const removed = removeFromInventoryByIndex(idx);
-        if (removed) log(`武器破棄：${removed.name}（${RARITY_LABEL[removed.rarity]} / +${removed.dps} DPS）`);
+        if (removed) {
+          log(`武器破棄：${removed.name}（${RARITY_LABEL[removed.rarity]} / DPS+${removed.dps} / DPC+${removed.dpc}）`);
+        }
         needsSlowRender = true;
         save();
         renderFast();
@@ -908,10 +1086,8 @@
     // do not auto-resume
     state.inRun = false;
 
-    // ensure enemy image is set
     elEnemyImg.src = enemyImagePath(clamp(state.enemyImageNo, 1, ENEMY_IMAGE_COUNT));
 
-    // First render
     renderFast();
     renderSlow();
     needsSlowRender = false;
