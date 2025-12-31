@@ -17,7 +17,7 @@
 
   <main class="wrap">
     <section class="panel">
-      <!-- ★Battle HUD -->
+      <!-- Battle HUD -->
       <div class="row">
         <div class="box hud">
           <div class="boxTitle">バトル</div>
@@ -33,6 +33,10 @@
             <div class="hudItem">
               <div class="hudLabel">敵HP</div>
               <div id="enemyHp" class="hudValue">-</div>
+            </div>
+            <div class="hudItem">
+              <div class="hudLabel">敵ATK（2局ごと）</div>
+              <div id="enemyAtk" class="hudValue">-</div>
             </div>
           </div>
         </div>
@@ -70,7 +74,6 @@
           <div id="hand" class="tiles hand"></div>
 
           <div class="drawnCol">
-            <div class="drawnLabel">ツモ</div>
             <div id="drawn" class="tiles drawn"></div>
           </div>
         </div>
@@ -89,6 +92,44 @@
       </div>
     </section>
   </main>
+
+  <!-- ★結果ダイアログ -->
+  <dialog id="resultDialog" class="resultDialog">
+    <div class="resultHead">
+      <div id="resultTitle" class="resultTitle">結果</div>
+      <div id="resultSub" class="resultSub"></div>
+    </div>
+
+    <div class="resultGrid">
+      <div class="resultBox">
+        <div class="resultBoxTitle">上がり形 / 手牌</div>
+        <div id="resultHand" class="tiles"></div>
+      </div>
+
+      <div class="resultBox">
+        <div class="resultBoxTitle">ドラ</div>
+        <div id="resultDora" class="tiles"></div>
+
+        <div class="resultBoxTitle mt8">裏ドラ</div>
+        <div id="resultUraDora" class="tiles"></div>
+      </div>
+
+      <div class="resultBox">
+        <div class="resultBoxTitle">役</div>
+        <ul id="resultYaku" class="resultYaku"></ul>
+
+        <div class="resultBoxTitle mt8">点数</div>
+        <div id="resultScore" class="resultScore"></div>
+
+        <div class="resultBoxTitle mt8">バトル</div>
+        <div id="resultBattle" class="resultScore"></div>
+      </div>
+    </div>
+
+    <div class="resultActions">
+      <button id="btnNextHand">次の局へ</button>
+    </div>
+  </dialog>
 
   <script src="./js/mahjong.js"></script>
   <script src="./js/battle.js"></script>
